@@ -133,7 +133,8 @@ body::before {
   100% { opacity: 0; transform: translate(-50%, -54%); }
 }
 .chip.bleed { color: #fff; background: #b8433a; border-color: transparent; }
-.card.t-counter .c-main big, .card.t-bleed .c-main big { color: #a8382f; }
+.card.t-counter .c-main big, .card.t-bleed .c-main big, .card.t-parry .c-main big, .card.t-thorns .c-main big { color: #a8382f; }
+.a-night.t-counter .c-main big, .a-night.t-thorns .c-main big, .a-night.t-bleed .c-main big { color: #ff9a8f; }
 @keyframes rise { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(-36px); } }
 
 /* guide */
@@ -170,6 +171,7 @@ body::before {
 .card.a-day { background: #fbf3df; border-color: #d9a441; color: #2a2010; }
 .card.a-night { background: #1f2453; border-color: #7f8cff; color: #e8eaff; }
 .card.a-none { background: #ebe8e2; border-color: #9c958a; color: #26231e; }
+.card.a-both { background: linear-gradient(160deg, #fbf3df 0 45%, #c9cdf0 100%); border-color: #b48ad9; color: #241a33; }
 .card.t-buddha, .card.t-ougi { background: #3a2b0c; border-color: #f0cf73; color: #fbefc8; }
 .card.t-mirror { background: #e4f1f6; border-color: #6fb3cf; color: #12313d; }
 .c-top { display: flex; justify-content: space-between; font-size: 11px; font-weight: 700; opacity: .75; }
@@ -353,6 +355,9 @@ details.rules ul { margin: 8px 0 4px; padding-left: 1.2em; display: grid; gap: 4
       <li>吸血：与えたダメージの半分だけHP回復。捨て身：大ダメージだが自分もHP-3。日蝕：日没・夜明けに2倍。</li>
       <li>裂傷：相手を3ターン出血させる。出血中はカードを「使う」たびにHP-2。応急処置で治る。</li>
       <li>反撃の構え：次の自分のターンまでに受ける最初の攻撃を半分にし、残り半分を相手に返す。</li>
+      <li>カウンター：見切り（次の自分のターンまでに受ける最初の攻撃を0にする）・報復（4ダメージ＋前の相手ターンに受けたダメージの半分）・棘の鎧（3ターンの間、攻撃を受けるたび相手に3ダメージ）。</li>
+      <li>毒：毒牙（4ダメージ＋毒2）・腐食（相手の毒の量だけ相手のシールドを削る）・毒の開花（相手の毒を今すぐ全部HPに入れて、毒を0にする）。</li>
+      <li>昼夜：陽転・月転（手札の夜カードを昼に／昼カードを夜に変えて1枚引く。1ターンの枚数に数えない）・薄明の刃（昼でも夜でも1.5倍。日没・夜明けは等倍）。</li>
       <li>日蝕の深まり：昼夜が1周するたびに、すべてのダメージ（毒・出血を含む）が+50%ずつ増える。長引くほど決着が早まる。</li>
       <li>デッキはメニューの「デッキ編集」で組める。30〜40枚、同じカードは3枚まで（仏の怒りは4枚まで）。</li>
     </ul>
