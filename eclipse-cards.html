@@ -148,8 +148,56 @@ body::before {
 .guide.big .btn { background: var(--accent-ink); color: var(--accent); border-color: transparent; }
 .guide-row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; }
 
+/* 直前の結果（HP・シールドが最終的にいくつになったか） */
+.result { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; font-size: 13px; min-height: 1.5em; font-variant-numeric: tabular-nums; }
+.res-label { color: var(--muted); font-size: 12px; }
+.chg { white-space: nowrap; font-weight: 500; }
+.chg b { font-size: 15px; }
+.chg small { font-size: 11.5px; margin-left: 1px; }
+.chg.sh small { color: var(--shield); } .chg.down small { color: var(--bad); } .chg.up small { color: var(--good); }
+
+/* 状態・溜め・場（モンスター） */
+.status { display: grid; gap: 6px; }
+.status:empty { display: none; }
+.st-row { display: grid; grid-template-columns: 2.6em 1fr; gap: 8px; align-items: start; }
+.st-head { font-size: 11.5px; font-weight: 700; color: var(--muted); padding-top: 5px; }
+.st-head.bad { color: var(--bad); } .st-head.good { color: var(--good); }
+.sts, .stacks, .mons { display: flex; flex-wrap: wrap; gap: 6px; }
+.st { display: grid; padding: 3px 9px; border-radius: 8px; border: 1px solid var(--line); background: var(--track); line-height: 1.3; }
+.st b { font-size: 12.5px; } .st small { font-size: 11px; color: var(--muted); }
+.st.poison { background: var(--poison); color: #fff; border-color: transparent; }
+.st.bleed { background: #b8433a; color: #fff; border-color: transparent; }
+.st.wrath { background: var(--buddha); color: #fff; border-color: transparent; }
+.st.poison small, .st.bleed small, .st.wrath small { color: rgba(255,255,255,.88); }
+.st.hiou { border-color: var(--accent); }
+.st.hiou b { color: var(--accent); }
+.stack { display: grid; padding: 4px 10px; border-radius: 8px; background: #3a2b0c; color: #fbefc8; border: 1px solid #f0cf73; line-height: 1.3; }
+.stack b { font-size: 13px; } .stack small { font-size: 11px; opacity: .9; }
+.pips { letter-spacing: 2px; font-size: 12px; }
+.pips.gold { color: #f0cf73; }
+.mon { display: grid; grid-template-columns: auto auto; column-gap: 8px; align-items: baseline; padding: 5px 10px; border-radius: 9px; border: 2px solid; min-width: 9em; line-height: 1.3; }
+.mon b { font-size: 13px; grid-column: 1 / -1; }
+.mon .mon-atk { font-family: var(--f-display); font-size: 22px; font-weight: 800; }
+.mon small { font-size: 10.5px; opacity: .8; }
+.mon.a-day { background: #fbf3df; border-color: #d9a441; color: #2a2010; }
+.mon.a-night { background: #1f2453; border-color: #7f8cff; color: #e8eaff; }
+.mon.a-none, .mon.a-both { background: #ebe8e2; border-color: #9c958a; color: #26231e; }
+
+/* カードの「使うと」 */
+.c-out { display: grid; gap: 1px; padding: 4px 6px; border-radius: 7px; background: rgba(0,0,0,.07); font-size: 11px; line-height: 1.3; font-variant-numeric: tabular-nums; }
+.a-night .c-out, .t-buddha .c-out, .t-ougi .c-out { background: rgba(255,255,255,.1); }
+.o-title { font-weight: 700; opacity: .7; }
+.o-row { display: flex; flex-wrap: wrap; gap: 0 6px; }
+.o-row .who { font-weight: 700; }
+.c-out .chg b { font-size: 12px; } .c-out .chg small { display: none; }
+.o-warn { color: #b03a2e; font-weight: 700; }
+.a-night .o-warn { color: #ff9a8f; }
+
 /* log */
-.log { height: 120px; overflow-y: auto; font-size: 13px; display: flex; flex-direction: column; gap: 1px; }
+.logbox summary { cursor: pointer; font-weight: 700; font-size: 13.5px; }
+.log { height: 220px; overflow-y: auto; font-size: 13px; display: flex; flex-direction: column; gap: 1px; margin-top: 8px; }
+.log .sum { font-weight: 700; display: flex; flex-wrap: wrap; gap: 0 8px; padding: 1px 0 3px; border-bottom: 1px dashed var(--line); }
+.log .sum .who { color: var(--muted); }
 .log p { margin: 0; }
 .log .turn { margin-top: 6px; color: var(--muted); font-size: 12px; letter-spacing: .05em; }
 .log .phase { color: var(--accent); font-weight: 700; }
@@ -164,7 +212,7 @@ body::before {
 .hand { display: flex; gap: 10px; overflow-x: auto; padding: 14px 2px 10px; scroll-snap-type: x proximity; }
 .card {
   flex: none; width: 136px; scroll-snap-align: start; position: relative;
-  display: grid; grid-template-rows: auto auto 1fr auto; gap: 4px;
+  display: grid; grid-template-rows: auto auto 1fr; grid-auto-rows: auto; gap: 4px;
   padding: 10px 10px 9px; border-radius: 11px; border: 2px solid;
 }
 .card.off { filter: saturate(.5); opacity: .7; }
@@ -280,7 +328,22 @@ details.rules ul { margin: 8px 0 4px; padding-left: 1.2em; display: grid; gap: 4
   .bar { height: 9px; }
   .note { display: none; }
   .pop { font-size: 22px; }
-  .log { height: 64px; font-size: 12px; padding: 6px 10px; }
+  .log { height: 180px; font-size: 12px; }
+  .result { font-size: 12px; }
+  .st-row { grid-template-columns: 2.3em 1fr; gap: 6px; }
+  .st { padding: 2px 7px; } .st small { font-size: 10.5px; }
+  .mon { min-width: 0; padding: 4px 8px; }
+  .mon .mon-atk { font-size: 18px; }
+  .c-out { font-size: 10.5px; padding: 3px 5px; }
+  /* 手札の帯が画面を埋めないように：説明は2行まで、ボタンは横並び、属性の行は色で分かるので消す */
+  .c-top { display: none; }
+  .c-main { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; min-height: 0; }
+  .c-main big { font-size: 19px; }
+  .c-btns { gap: 4px; }
+  .c-btn { flex-direction: row !important; justify-content: space-between !important; align-items: baseline !important; padding: 4px 6px !important; font-size: 12px; white-space: nowrap; }
+  .c-btn span + span { font-size: 10px; }
+  .guide-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .o-title { display: none; }
   .log .turn { margin-top: 3px; font-size: 11px; }
   .dock {
     position: sticky; bottom: 0; z-index: 5; margin-inline: -16px; padding: 8px 16px calc(8px + env(safe-area-inset-bottom, 0px));
@@ -324,7 +387,6 @@ details.rules ul { margin: 8px 0 4px; padding-left: 1.2em; display: grid; gap: 4
   </section>
 
   <section class="box side" id="side-enemy" aria-label="敵"></section>
-  <div class="box log" id="log" aria-live="polite"></div>
   <section class="box side" id="side-me" aria-label="あなた"></section>
 
   <div class="dock">
@@ -334,6 +396,11 @@ details.rules ul { margin: 8px 0 4px; padding-left: 1.2em; display: grid; gap: 4
       <div class="hand" id="hand"></div>
     </section>
   </div>
+
+  <details class="box logbox">
+    <summary>ログ（何が起きたかの細かい記録）</summary>
+    <div class="log" id="log"></div>
+  </details>
 
   <details class="box rules">
     <summary>ルール一覧</summary>
@@ -346,11 +413,13 @@ details.rules ul { margin: 8px 0 4px; padding-left: 1.2em; display: grid; gap: 4
       <li>日没と夜明けのターンに、昼の指定カードと夜の指定カードを1枚ずつ同時に使うと秘奥を1つ獲得（どの組み合わせで使うかは選べる）。同じ秘奥は二度と取れない。</li>
       <li>指定カード（昼2種・夜2種）はデッキ編集の「★指定」で自分で選べる。選ばなかった分は、デッキで枚数の多いカードが自動で入る。</li>
       <li>選べる秘奥はデッキのタイプで変わる（各3つ）。蠱毒入り＝毒の秘奥（疫病・猛毒・防御強化）、鏡花水月入り＝鏡の秘奥（不動・ドロー強化・返し刃）、修羅入り＝血の秘奥（血の渇き・不死身・攻撃強化）、天照入りか昼カードが4枚以上多い＝陽の秘奥（攻撃強化・陽光・灼光）、月読入りか夜カードが4枚以上多い＝月の秘奥（月影・ドロー強化・吸命）、それ以外＝蝕の秘奥（攻撃強化・ドロー強化・防御強化）。</li>
-      <li>奥義カード（仏の怒り・天照・月読・蠱毒・鏡花水月）は使うと溜まり、4枚目で必殺技。シールド消費なし、同じ奥義は1ターンに1枚まで。</li>
-      <li>仏の怒り：3枚で怒り状態（仏の怒り以外は使えない・攻撃を受けるたびダメージ-5、毒と出血は減らない・ドロー枚数は普段どおり）、4枚目で14ダメージ。怒り状態で4枚目を待ったターン1回ごとに必殺技のダメージ+1。</li>
+      <li>奥義カード（仏の怒り・天照・月読・蠱毒・鏡花水月・修羅）は使うと溜まり、4枚目で必殺技。シールド消費なし、同じ奥義は1ターンに1枚まで。</li>
+      <li>溜めている間（k枚）も効果がある：天照＝昼カードのダメージ+2k、月読＝相手のシールド回復-k、蠱毒＝毎ターン相手のHPに直接k、鏡花水月＝受ける攻撃-15%×k・受けたダメージの半分を返す、修羅＝HPを払うカードのダメージ+k、仏の怒り＝受ける攻撃-2k。必殺技を撃つとリセット。</li>
+      <li>仏の怒り：3枚で怒り状態（仏の怒りと合掌以外は使えない・攻撃を受けるたびダメージ-7、毒と出血は減らない・ドロー枚数は普段どおり）、4枚目で18ダメージ。怒り状態で4枚目を待ったターン1回ごとに必殺技のダメージ+2。</li>
+      <li>仏の怒り用：読経（デッキから仏の怒りを1枚手札へ）・合掌（シールド+5、怒り状態でも使える）・金剛（次の自分のターンまで受ける攻撃-4）。</li>
       <li>天照：10ダメージ＋以降、自分の昼カードは夜でも1.5倍。月読：10ダメージ＋以降、相手のシールド回復量が半分・自分の夜カードは昼でも1.5倍。</li>
       <li>蠱毒：相手に毒8＋以降、自分が与える毒と出血のダメージが3倍。鏡花水月：以降、相手の攻撃カードを受けるときに1回だけ、1.5倍にして跳ね返すかを選べる（跳ね返すと自分は無傷）。</li>
-      <li>自傷：血刃（HPを3払って8ダメージ）・狂血（減ったHP4ごとにダメージ+1）・血の盾（HPを4払ってシールド+8）・再生（4ターンの間、毎ターンHP+3）。奥義の修羅は4枚目でHP10回復＋以降、HPを払うカードのダメージが1.5倍。</li>
+      <li>自傷：血刃（HPを3払って8ダメージ）・狂血（減ったHP4ごとにダメージ+1）・血の盾（HPを4払ってシールド+8）・再生（4ターンの間、毎ターンHP+3）。血の契約（HPを5払って2枚引く）・返り血（HPを3払って4ダメージ、与えた分シールド回復）・鮮血の舞（HPを3払って4ダメージ、HPが半分以下なら2倍）。奥義の修羅は4枚目でHP10回復＋以降、HPを払うカードのダメージが1.25倍。</li>
       <li>召喚したモンスターは最大2体。自分のターン終了時に攻撃し、3ターンで去る。</li>
       <li>吸血：与えたダメージの半分だけHP回復。捨て身：大ダメージだが自分もHP-3。日蝕：日没・夜明けに2倍。</li>
       <li>裂傷：相手を3ターン出血させる。出血中はカードを「使う」たびにHP-2。応急処置で治る。</li>
@@ -359,7 +428,7 @@ details.rules ul { margin: 8px 0 4px; padding-left: 1.2em; display: grid; gap: 4
       <li>毒：毒牙（4ダメージ＋毒2）・腐食（相手の毒の量だけ相手のシールドを削る）・毒の開花（相手の毒を今すぐ全部HPに入れて、毒を0にする）。</li>
       <li>昼夜：陽転・月転（手札の夜カードを昼に／昼カードを夜に変えて1枚引く。1ターンの枚数に数えない）・薄明の刃（昼でも夜でも1.5倍。日没・夜明けは等倍）。</li>
       <li>日蝕の深まり：昼夜が1周するたびに、すべてのダメージ（毒・出血を含む）が+50%ずつ増える。長引くほど決着が早まる。</li>
-      <li>デッキはメニューの「デッキ編集」で組める。30〜40枚、同じカードは3枚まで（仏の怒りは4枚まで）。</li>
+      <li>デッキはメニューの「デッキ編集」で組める。36枚ちょうど、同じカードは3枚まで（奥義は4枚まで）。</li>
     </ul>
   </details>
 </div>
