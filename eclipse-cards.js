@@ -902,26 +902,32 @@ function statusChips(p) {
   for (const b of BUFF_ORDER) if (p.buffs.has(b)) tag(good, BUFFS[b][0], BUFFS[b][1].replace("以降、", ""), "hiou");
   return { good, bad };
 }
+/* シールドとHPのゲージ。pv（選んでいるカードの見込み [HP前, HP後, シールド前, シールド後]）があれば、
+   変わる部分をゲージと同じ色で薄く点滅させる */
+function renderBars(key, p, pv = null) {
+  const [h1, s1] = pv ? [pv[1], pv[3]] : [p.hp, p.shield];
+  const bar = (k, now, after, cap) => {
+    const a = Math.max(0, now) / cap * 100, b = Math.max(0, after) / cap * 100;
+    $(`${key}-${k}`).style.width = `${Math.min(a, b)}%`;
+    const gh = $(`${key}-${k}g`);
+    gh.className = `gh ${k}${b < a ? " loss" : b > a ? " gain" : ""}`;
+    gh.style.left = `${Math.min(a, b)}%`; gh.style.width = `${Math.abs(a - b)}%`;
+    const cur = Math.max(0, now), nxt = Math.max(0, after);
+    $(`${key}-${k}o`).innerHTML = cur === nxt ? `${cur}/${cap}` : `${cur}→<b class="${nxt < cur ? "down" : "up"}">${nxt}</b>`;
+  };
+  const low = Math.max(0, h1) <= R.MAX_HP / 3;
+  $(`${key}-hp`).classList.toggle("low", low);
+  $(`${key}-hpg`).classList.toggle("low", low);
+  bar("hp", p.hp, h1, R.MAX_HP);
+  bar("sh", p.shield, s1, R.SHIELD_CAP);
+}
 function renderSide(key, p, pv = null) {
   const i = g.idx(p);
   const head = [`<span class="side-name">${nameOf(i)}</span>`];
   if (i !== seat) head.push(`<span class="chip">手札${p.hand.length}枚</span>`);
   head.push(`<span class="chip">デッキ${p.deck.length}</span>`);
   $(`${key}-head`).innerHTML = head.join("");
-  // pv（選んでいるカードの見込み [HP前, HP後, シールド前, シールド後]）があれば、変わる分をゲージに重ねる
-  const [h1, s1] = pv ? [pv[1], pv[3]] : [p.hp, p.shield];
-  const bar = (k, now, after, cap) => {
-    const a = Math.max(0, now) / cap * 100, b = Math.max(0, after) / cap * 100;
-    $(`${key}-${k}`).style.width = `${Math.min(a, b)}%`;
-    const gh = $(`${key}-${k}g`);
-    gh.className = `gh${b < a ? " loss" : b > a ? ` gain ${k}` : ""}`;
-    gh.style.left = `${Math.min(a, b)}%`; gh.style.width = `${Math.abs(a - b)}%`;
-    const cur = Math.max(0, now), nxt = Math.max(0, after);
-    $(`${key}-${k}o`).innerHTML = cur === nxt ? `${cur}/${cap}` : `${cur}→<b class="${nxt < cur ? "down" : "up"}">${nxt}</b>`;
-  };
-  $(`${key}-hp`).classList.toggle("low", Math.max(0, h1) <= R.MAX_HP / 3);
-  bar("hp", p.hp, h1, R.MAX_HP);
-  bar("sh", p.shield, s1, R.SHIELD_CAP);
+  renderBars(key, p, pv);
 
   // 直前の結果：この人のHPかシールドが変わった一番新しい行動
   const last = [...g.logs].reverse().find(l => l.k === "sum" && changeText(l.a[i]));
@@ -1014,33 +1020,16 @@ function selPreview() {
   checkSel();
   return sel?.mode ? simulate(sel.uid, sel.mode) : null;
 }
-/* ゲージ1本：減る分は赤い縞、増える分は薄い色で重ねる */
-function gaugeHTML(cls, a, b, cap) {
-  const pa = Math.max(0, a) / cap * 100, pb = Math.max(0, b) / cap * 100;
-  const ghost = b < a ? `<b class="gh loss" style="left:${pb}%;width:${pa - pb}%"></b>`
-    : b > a ? `<b class="gh gain ${cls}" style="left:${pa}%;width:${pb - pa}%"></b>` : "";
-  return `<div class="bar"><i class="${cls}" style="width:${Math.min(pa, pb)}%"></i>${ghost}</div>`;
-}
-function gaugeVal(a, b) {
-  return a === b ? `${Math.max(0, a)}` : `${Math.max(0, a)}→<b class="${b < a ? "down" : "up"}">${Math.max(0, b)}</b>`;
-}
 function selGuideHTML(me) {
   const c = selectedCard();
-  const d = selPreview();
   const modes = isOugi(c) ? [["use", "溜める"]] : [["use", "使う"], ["recover", "回復"]];
   const btns = modes.map(([m, label]) => {
     const ok = g.canPlay(me, c, m), on = sel.mode === m;
     return `<button class="btn${on ? " primary" : ""}" data-act="${m === "use" ? "use" : "rec"}" data-uid="${c.uid}" ${ok ? "" : "disabled"}>${on ? `${label}で決定` : label}</button>`;
   }).join("");
-  const rows = d ? [seat, 1 - seat].map(i => {
-    const [h0, h1, s0, s1] = d[i];
-    return `<div class="pv-who">${i === seat ? "自分" : nameOf(i)}</div>
-      <span>シールド</span>${gaugeHTML("sh", s0, s1, R.SHIELD_CAP)}<output>${gaugeVal(s0, s1)}</output>
-      <span>HP</span>${gaugeHTML("hp", h0, h1, R.MAX_HP)}<output>${gaugeVal(h0, h1)}</output>`;
-  }).join("") : "";
   const warn = sel.mode === "use" && g.players[1 - seat].kyoka && c.type === "attack" ? `<div class="o-warn">相手は鏡花水月で跳ね返してくるかもしれない</div>` : "";
-  return `<div class="guide-title">${c.name}${sel.mode ? `を${sel.mode === "use" ? (isOugi(c) ? "溜める" : "使う") : "回復に回す"}と` : "：使うか回復か選ぼう"}</div>
-    ${d ? `<div class="pv">${rows}</div>${warn}` : `<div class="guide-text">選ぶと、自分と${nameOf(1 - seat)}のHP・シールドがどうなるかをゲージで表示する。もう一度押すと決定。</div>`}
+  return `<div class="guide-title">${c.name}${sel.mode ? `を${sel.mode === "use" ? (isOugi(c) ? "溜める" : "使う") : "回復に回す"}` : "：使うか回復か選ぼう"}</div>
+    <div class="guide-text">${sel.mode ? "ゲージの点滅している部分が変わる。もう一度押すと決定。" : "選ぶと、HPとシールドの変わる部分がゲージで点滅する。"}</div>${warn}
     <div class="guide-row"><div class="pairs">${btns}</div><button class="btn" data-act="cancel">やめる</button></div>`;
 }
 
@@ -1105,6 +1094,7 @@ function render() {
   const pv = selPreview();
   renderSide("enemy", en, pv?.[1 - seat]);
   renderSide("me", me, pv?.[seat]);
+  renderBars("mini", me, pv?.[seat]);   // スマホ用：手札の帯の上に出す自分のゲージ
   renderLog();
 
   const guide = $("guide");
@@ -1148,7 +1138,7 @@ function hideDialog() { $("overlay").hidden = true; $("dialog").dataset.kind = "
 function howToHTML() {
   return `<ol>
     <li><b>カードの「使う」</b>を押すと、シールドを消費して攻撃や回復ができる。<b>「回復」</b>を押すと、そのカードを捨ててシールドを増やせる。<b>1ターンに使えるのは${R.PLAY_LIMIT}枚まで</b>。</li>
-    <li>1回押すと、カードが浮かんで<b>HPとシールドがどうなるかがゲージに出る</b>（減る分は赤い縞）。<b>同じボタンをもう一度押すと決定</b>。やめるときはカードをもう一度押すか「やめる」。</li>
+    <li>1回押すと、カードが浮かんで<b>HPとシールドがどうなるかがゲージに出る</b>（変わる部分が点滅する）。<b>同じボタンをもう一度押すと決定</b>。やめるときはカードをもう一度押すか「やめる」。</li>
     <li>シールドは<b>攻撃のコスト</b>であり、<b>敵の攻撃を受け止める壁</b>でもある。攻めるほど守りが薄くなる。終わったら<b>ターン終了</b>。</li>
     <li>${PHASE_ROUNDS}巡ごとに<b>日没</b>と<b>夜明け</b>が来る。そのとき昼と夜の<b>指定カード</b>を1枚ずつ同時に使うと、試合中ずっと続く<b>秘奥</b>がもらえる（${R.PLAY_LIMIT}枚には数えない）。選べる秘奥はデッキのタイプで変わる。</li>
   </ol>`;
