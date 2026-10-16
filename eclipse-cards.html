@@ -183,15 +183,25 @@ body::before {
 .mon.a-night { background: #1f2453; border-color: #7f8cff; color: #e8eaff; }
 .mon.a-none, .mon.a-both { background: #ebe8e2; border-color: #9c958a; color: #26231e; }
 
-/* カードの「使うと」 */
-.c-out { display: grid; gap: 1px; padding: 4px 6px; border-radius: 7px; background: rgba(0,0,0,.07); font-size: 11px; line-height: 1.3; font-variant-numeric: tabular-nums; }
-.a-night .c-out, .t-buddha .c-out, .t-ougi .c-out { background: rgba(255,255,255,.1); }
-.o-title { font-weight: 700; opacity: .7; }
-.o-row { display: flex; flex-wrap: wrap; gap: 0 6px; }
-.o-row .who { font-weight: 700; }
-.c-out .chg b { font-size: 12px; } .c-out .chg small { display: none; }
-.o-warn { color: #b03a2e; font-weight: 700; }
-.a-night .o-warn { color: #ff9a8f; }
+/* カードを選ぶ：浮かび上がり、ゲージに見込みが重なる。同じボタンをもう一度押すと決定 */
+.bar { position: relative; }
+.gh { position: absolute; top: 0; bottom: 0; width: 0; transition: left .25s, width .25s; }
+.gh.loss { background: repeating-linear-gradient(-45deg, var(--bad) 0 4px, rgba(255,255,255,.35) 4px 7px); }
+.gh.gain.sh { background: var(--shield); opacity: .45; }
+.gh.gain.hp { background: var(--hp); opacity: .45; }
+.bars output b.down, .pv output b.down { color: var(--bad); }
+.bars output b.up, .pv output b.up { color: var(--good); }
+.card { cursor: pointer; transition: transform .18s ease, box-shadow .18s ease, opacity .18s ease; }
+.card.lifted { transform: translateY(-12px) scale(1.04); box-shadow: 0 14px 28px rgba(0,0,0,.35); outline: 3px solid var(--accent); outline-offset: 2px; z-index: 2; }
+.card.dim { opacity: .5; }
+.c-btn.armed { box-shadow: 0 0 0 3px #fff, 0 0 0 6px var(--accent); animation: armed 1s ease-in-out infinite; }
+@keyframes armed { 50% { filter: brightness(1.25); } }
+.guide.picking { border-width: 3px; }
+.pv { display: grid; grid-template-columns: 4.6em 1fr 4.6em; gap: 3px 10px; align-items: center; font-variant-numeric: tabular-nums; }
+.pv .pv-who { grid-column: 1 / -1; font-weight: 700; font-size: 13px; margin-top: 2px; }
+.pv span { font-size: 12px; color: var(--muted); }
+.pv output { font-weight: 700; text-align: right; font-size: 13px; }
+.o-warn { color: var(--bad); font-weight: 700; font-size: 13px; }
 
 /* log */
 .logbox summary { cursor: pointer; font-weight: 700; font-size: 13.5px; }
@@ -209,7 +219,7 @@ body::before {
 /* hand */
 .hand-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 13px; color: var(--muted); }
 .hand-head strong { color: var(--ink); font-family: var(--f-display); font-size: 17px; }
-.hand { display: flex; gap: 10px; overflow-x: auto; padding: 14px 2px 10px; scroll-snap-type: x proximity; }
+.hand { display: flex; gap: 10px; overflow-x: auto; padding: 22px 6px 10px; scroll-snap-type: x proximity; }
 .card {
   flex: none; width: 136px; scroll-snap-align: start; position: relative;
   display: grid; grid-template-rows: auto auto 1fr; grid-auto-rows: auto; gap: 4px;
@@ -334,7 +344,9 @@ details.rules ul { margin: 8px 0 4px; padding-left: 1.2em; display: grid; gap: 4
   .st { padding: 2px 7px; } .st small { font-size: 10.5px; }
   .mon { min-width: 0; padding: 4px 8px; }
   .mon .mon-atk { font-size: 18px; }
-  .c-out { font-size: 10.5px; padding: 3px 5px; }
+  .pv { grid-template-columns: 3.6em 1fr 4.2em; gap: 2px 6px; }
+  .pv .pv-who { font-size: 12px; margin-top: 0; }
+  .pv .bar { height: 8px; }
   /* 手札の帯が画面を埋めないように：説明は2行まで、ボタンは横並び、属性の行は色で分かるので消す */
   .c-top { display: none; }
   .c-main { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; min-height: 0; }
@@ -343,7 +355,8 @@ details.rules ul { margin: 8px 0 4px; padding-left: 1.2em; display: grid; gap: 4
   .c-btn { flex-direction: row !important; justify-content: space-between !important; align-items: baseline !important; padding: 4px 6px !important; font-size: 12px; white-space: nowrap; }
   .c-btn span + span { font-size: 10px; }
   .guide-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .o-title { display: none; }
+  .hand { padding: 18px 4px 2px; }
+  .card.lifted { transform: translateY(-8px); }
   .log .turn { margin-top: 3px; font-size: 11px; }
   .dock {
     position: sticky; bottom: 0; z-index: 5; margin-inline: -16px; padding: 8px 16px calc(8px + env(safe-area-inset-bottom, 0px));
