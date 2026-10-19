@@ -1754,7 +1754,10 @@ async function connectSupabase(config) {
     current: async () => who((await sb.auth.getSession()).data.session?.user),
     onChange: cb => sb.auth.onAuthStateChange((_, session) => cb(who(session?.user))),
     /* Googleの画面に移って、ログインしたらこのページに戻ってくる */
-    login: () => sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: location.origin + location.pathname } }),
+    /* 戻り先はいつも「同じフォルダの eclipse-cards.html」。.html を省いたアドレスで開いていても、
+       Supabase の Redirect URLs に登録したアドレスと一致するように */
+    login: () => sb.auth.signInWithOAuth({ provider: "google",
+      options: { redirectTo: location.origin + location.pathname.replace(/[^/]*$/, "") + "eclipse-cards.html" } }),
     logout: () => sb.auth.signOut(),
   };
   return supabaseDb(sb);
