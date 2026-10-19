@@ -1497,7 +1497,7 @@ function showOnline(msg = "", ok = false) {
   const saved = loadSavedRoom();
   let online;
   if (onlineState === "loading") online = `<p>オンライン対戦を準備中…</p>`;
-  else if (onlineState === "off") online = `<p>オンライン対戦の準備ができていない（claude.ai で開くか、firebase-config.js に Firebase の設定を書くと使える）。</p>`;
+  else if (onlineState === "off") online = `<p>オンライン対戦の準備ができていない（claude.ai で開くか、supabase-config.js に Supabase の設定を書くと使える）。</p>`;
   else if (canWrite === false) online = `<p>この共有設定では対戦データを保存できない。ページの持ち主に「編集者」として招待してもらおう。</p>`;
   else online = `
     <div class="join">
@@ -1634,7 +1634,8 @@ async function endMyTurn() {
    claude.ai で開いたときは claude.ai の共有データ、自分のサイト（GitHub Pages など）で開いたときは Firebase を使う。
    どちらも doc(path) → { get, set, onSnapshot, acquire } の同じ形で扱う。 */
 let dbApi = null, userApi = null, uid = null, canWrite = null, onlineState = "loading";
-let backend = null;         // "claude" | "firebase" | null
+let backend = null;         // "claude" | "supabase" | "firebase" | null
+let authApi = null;         // Googleでログイン { current, onChange, login, logout }（Supabase か Firebase のとき）
 let room = null;            // { code, ref, unsub, hostId, guestId }
 let localSeq = 0;
 let writeChain = Promise.resolve();
@@ -1683,10 +1684,80 @@ function firebaseDb() {
 }
 async function connectFirebase(config) {
   await loadScript(`https://www.gstatic.com/firebasejs/${FIREBASE_VER}/firebase-app-compat.js`);
-  await loadScript(`https://www.gstatic.com/firebasejs/${FIREBASE_VER}/firebase-auth-compat.js`);   // Googleでログイン（eclipse-shop.js が使う）
+  await loadScript(`https://www.gstatic.com/firebasejs/${FIREBASE_VER}/firebase-auth-compat.js`);   // Googleでログイン
   await loadScript(`https://www.gstatic.com/firebasejs/${FIREBASE_VER}/firebase-database-compat.js`);
   if (!firebase.apps.length) firebase.initializeApp(config);
+  const auth = firebase.auth();
+  const who = u => u && { id: u.uid, name: u.displayName || "", email: u.email || "" };
+  authApi = {
+    current: () => new Promise(res => { const off = auth.onAuthStateChanged(u => { off(); res(who(u)); }); }),
+    onChange: cb => auth.onAuthStateChanged(u => cb(who(u))),
+    login: () => auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()),
+    logout: () => auth.signOut(),
+  };
   return firebaseDb();
+}
+
+/* ===== Supabase（単語リングと同じプロジェクト。Eclipse Cards 用のテーブルを使う）=====
+   部屋：eclipse_rooms（code, data）。変わったらリアルタイムで知らせてもらう
+   プレイヤー：eclipse_player_get / eclipse_player_put（本人か引き継ぎコードのときだけ読み書きできる関数）
+   部屋を押さえる：eclipse_acquire */
+const SUPABASE_JS = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js";
+function supabaseDb(sb) {
+  const snap = v => ({ exists: v != null, data: () => v });
+  return {
+    doc(path) {
+      const [kind, id] = path.split("/");
+      if (kind === "players") return {
+        async get() { const { data, error } = await sb.rpc("eclipse_player_get", { p_id: id }); if (error) throw error; return snap(data); },
+        async set(v) { const { error } = await sb.rpc("eclipse_player_put", { p_id: id, p_data: v }); if (error) throw error; },
+      };
+      const get = async () => {
+        const { data, error } = await sb.from("eclipse_rooms").select("data").eq("code", id).maybeSingle();
+        if (error) throw error;
+        return snap(data?.data ?? null);
+      };
+      return {
+        get,
+        async set(v) {
+          const { error } = await sb.from("eclipse_rooms").upsert({ code: id, data: v, updated_at: new Date().toISOString() });
+          if (error) throw error;
+        },
+        /* 短い時間だけ部屋を押さえる（2人が同時に入ろうとしたとき用） */
+        async acquire({ holder, ttlMs = 5000 }) {
+          const { data, error } = await sb.rpc("eclipse_acquire", { p_code: id, p_holder: holder, p_ttl_ms: ttlMs });
+          if (error) throw error;
+          return { acquired: !!data };
+        },
+        /* 部屋が書き換わるたびに最新を読み直して知らせる（つながった直後にも1回） */
+        onSnapshot(next, error) {
+          let alive = true;
+          const pull = () => get().then(s => { if (alive) next(s); }, e => alive && error?.(e));
+          const ch = sb.channel(`eclipse-room-${id}-${Math.random().toString(36).slice(2, 7)}`)
+            .on("postgres_changes", { event: "*", schema: "public", table: "eclipse_rooms", filter: `code=eq.${id}` }, pull)
+            .subscribe(st => {
+              if (st === "SUBSCRIBED") pull();
+              else if (st === "CHANNEL_ERROR" || st === "TIMED_OUT") error?.(new Error(st));
+            });
+          return () => { alive = false; sb.removeChannel(ch); };
+        },
+      };
+    },
+  };
+}
+async function connectSupabase(config) {
+  await loadScript(SUPABASE_JS);
+  const sb = supabase.createClient(config.url, config.key,
+    { auth: { flowType: "pkce", persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+  const who = u => u && { id: u.id, name: u.user_metadata?.full_name || u.user_metadata?.name || "", email: u.email || "" };
+  authApi = {
+    current: async () => who((await sb.auth.getSession()).data.session?.user),
+    onChange: cb => sb.auth.onAuthStateChange((_, session) => cb(who(session?.user))),
+    /* Googleの画面に移って、ログインしたらこのページに戻ってくる */
+    login: () => sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: location.origin + location.pathname } }),
+    logout: () => sb.auth.signOut(),
+  };
+  return supabaseDb(sb);
 }
 
 (async () => {
@@ -1697,6 +1768,10 @@ async function connectFirebase(config) {
       if (dbApi && uid) backend = "claude";
     }
   } catch { dbApi = null; }
+  if (!backend && window.SUPABASE_CONFIG) {
+    try { dbApi = await connectSupabase(window.SUPABASE_CONFIG); uid = localUid(); canWrite = true; backend = "supabase"; }
+    catch { dbApi = null; authApi = null; }
+  }
   if (!backend && window.FIREBASE_CONFIG) {
     try { dbApi = await connectFirebase(window.FIREBASE_CONFIG); uid = localUid(); canWrite = true; backend = "firebase"; }
     catch { dbApi = null; }
@@ -1714,6 +1789,9 @@ function dbErr(e) {
   const c = e?.code;
   if (backend === "firebase" && /permission/i.test(`${c} ${e?.message}`))
     return "Firebase に保存できなかった。Firebase の Realtime Database のルールを手順書どおりに設定したか確認しよう。";
+  if (backend === "supabase" && /^(PGRST20[25]|42P01|42883)$/.test(c || ""))
+    return "Supabase に Eclipse Cards のテーブルがまだない。supabase-setup.sql を SQL Editor で実行したか確認しよう。";
+  if (backend === "supabase" && c === "42501") return "Supabase のルールで保存が止められた。supabase-setup.sql をもう一度実行しよう。";
   if (c === "invalid_argument") return "保存できなかった。このページを「編集者」として共有してもらっているか確認しよう。";
   if (c === "quota_exceeded") return "保存領域がいっぱいで部屋を作れない。";
   return "通信できなかった。少し待ってからもう一度試そう。";

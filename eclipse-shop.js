@@ -1,6 +1,6 @@
 /* Eclipse Cards — ポイント・賭け・ショップ・カードパック・コレクション・プロフィール
    ポイントはゲームの中だけのもの（お金では買えない）。
-   保存：この端末のブラウザ＋Firebase。Googleでログインしていれば players/<アカウントのuid>、
+   保存：この端末のブラウザ＋Supabase（予備で Firebase）。Googleでログインしていれば players/<アカウントのid>、
    していなければ players/<引き継ぎコード>（claude.ai では自分専用の場所）。
    eclipse-cards.js の後に読み込み、window.Meta として本体から呼ばれる。 */
 (() => {
@@ -27,7 +27,7 @@
   const PACKS = { card: ["カードパック", 100, "カード5枚（1枚はレア以上）。デッキに入れられるカードが増える"], art: ["絵柄パック", 150, "絵柄違い3つ（キラ・金枠・日蝕版）。強さは変わらない"] };
 
   let prof = null, key = null, saveTimer = 0, armed = "", shopTab = "pack";
-  let user = null;   // Googleでログインしているアカウント（firebase.User）
+  let user = null;   // Googleでログインしているアカウント { id, name, email }
   const M = { roomBet: 0 };
   const today = () => new Date().toLocaleDateString("sv");   // 2026-10-19 の形
   const pick = list => list[Math.floor(Math.random() * list.length)];
@@ -41,9 +41,9 @@
   function remoteDoc() {
     if (!dbApi) return null;
     if (backend === "claude") return dbApi.doc(`data/users/${uid}/profile`);
-    return dbApi.doc(`players/${user ? user.uid : key}`);
+    return dbApi.doc(`players/${user ? user.id : key}`);
   }
-  const owner = () => user ? `google:${user.uid}` : `key:${key}`;   // この保存データが誰のものか
+  const owner = () => user ? `google:${backend}:${user.id}` : `key:${key}`;   // この保存データが誰のものか
   function save() {
     if (!prof) return;
     prof.updated = Date.now();
@@ -75,14 +75,13 @@
   M.onBackend = async () => {
     if (backendDone || !dbApi) return;
     backendDone = true;
-    if (backend === "firebase" && window.firebase?.auth) {
-      const auth = firebase.auth();
-      user = await new Promise(res => { const off = auth.onAuthStateChanged(u => { off(); res(u); }); });
-      auth.onAuthStateChanged(async u => {   // あとからのログイン・ログアウト
-        if ((u?.uid || null) === (user?.uid || null)) return;
+    if (authApi) {
+      try { user = await authApi.current(); } catch { user = null; }
+      authApi.onChange(async u => {   // あとからのログイン・ログアウト
+        if ((u?.id || null) === (user?.id || null)) return;
         user = u;
         await loadRemote();
-        if ($("dialog").dataset.kind === "profile") showProfile(u ? `${u.displayName || "Googleアカウント"}でログインした。` : "ログアウトした。この端末の保存に戻った。");
+        if ($("dialog").dataset.kind === "profile") showProfile(u ? `${u.name || "Googleアカウント"}でログインした。` : "ログアウトした。この端末の保存に戻った。");
         else refreshHome();
       });
     }
@@ -104,7 +103,7 @@
     } catch {}
   }
   async function login() {
-    try { await firebase.auth().signInWithPopup(new firebase.auth.GoogleAuthProvider()); }
+    try { const r = await authApi.login(); if (r?.error) throw r.error; }
     catch (e) {
       const why = {
         "auth/popup-blocked": "ログインの小さい画面がブロックされた。ブラウザでポップアップを許可して、もう一度押そう。",
@@ -112,7 +111,7 @@
         "auth/cancelled-popup-request": "ログインをやめた。",
         "auth/unauthorized-domain": "このサイトのアドレスが Firebase の「承認済みドメイン」に入っていない。",
         "auth/operation-not-allowed": "Firebase の Authentication で Google が有効になっていない。",
-      }[e?.code] || `ログインできなかった（${e?.code || e}）。`;
+      }[e?.code] || `ログインできなかった（${e?.code || e?.message || e}）。`;
       showProfile(why);
     }
   }
@@ -191,9 +190,9 @@
       <span class="prof-pts"><b>${prof.points}</b><small>pt・賭け上限${M.cap()}</small></span>
     </button>${M.loginHTML()}`;
   };
-  const canLogin = () => backend === "firebase" && !!window.firebase?.auth;
+  const canLogin = () => !!authApi;
   M.loginHTML = () => !prof || !canLogin() ? "" : user
-    ? `<p class="login-line">Googleでログイン中（${esc(user.displayName || user.email || "")}）。どの端末でも同じデータ。</p>`
+    ? `<p class="login-line">Googleでログイン中（${esc(user.name || user.email || "")}）。どの端末でも同じデータ。</p>`
     : `<p class="login-line"><button class="btn small" data-act="login">Googleでログイン</button> どの端末でも同じデータで遊べる</p>`;
   M.tilesHTML = () => `
     <button class="tile" data-act="shop"><b>ショップ</b><span>パック・スリーブ・マット・装飾</span></button>
@@ -334,7 +333,7 @@
       ${choose("icon")}${choose("title")}${choose("frame")}${choose("sleeve")}${choose("mat")}
       <p>戦績：${prof.stats.win}勝 ${prof.stats.lose}敗 ${prof.stats.draw}分　所持 ${prof.points}pt</p>
       ${canLogin() ? `<h3>Googleでログイン</h3>${user
-        ? `<p>ログイン中：<b>${esc(user.displayName || "")}</b>（${esc(user.email || "")}）。データはこのアカウントに保存され、ほかの端末でもログインすれば同じになる。</p>
+        ? `<p>ログイン中：<b>${esc(user.name || "")}</b>（${esc(user.email || "")}）。データはこのアカウントに保存され、ほかの端末でもログインすれば同じになる。</p>
            <button class="btn sub small" data-act="logout">ログアウト</button>`
         : `<p>ログインすると、どの端末でも同じデータで遊べる。本人以外はデータを書き換えられない。今この端末にあるデータは、はじめてログインしたときにアカウントへ移る。</p>
            <button class="btn small" data-act="login">Googleでログイン</button>`}` : ""}
@@ -382,7 +381,7 @@
       case "rename": { const v = $("nameIn")?.value.trim(); if (v) { prof.name = v.slice(0, 12); save(); } showProfile("名前を変えた。"); return true; }
       case "load-key": loadKey($("keyIn")?.value); return true;
       case "login": login(); return true;
-      case "logout": firebase.auth().signOut(); return true;
+      case "logout": authApi?.logout(); return true;
       case "close": if ($("dialog").dataset.kind !== "starter" && document.body.dataset.view === "home") { showHome(); return true; } return false;
     }
     return false;
