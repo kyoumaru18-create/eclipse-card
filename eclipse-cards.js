@@ -1683,6 +1683,7 @@ function firebaseDb() {
 }
 async function connectFirebase(config) {
   await loadScript(`https://www.gstatic.com/firebasejs/${FIREBASE_VER}/firebase-app-compat.js`);
+  await loadScript(`https://www.gstatic.com/firebasejs/${FIREBASE_VER}/firebase-auth-compat.js`);   // Googleでログイン（eclipse-shop.js が使う）
   await loadScript(`https://www.gstatic.com/firebasejs/${FIREBASE_VER}/firebase-database-compat.js`);
   if (!firebase.apps.length) firebase.initializeApp(config);
   return firebaseDb();

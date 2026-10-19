@@ -1,6 +1,7 @@
 /* Eclipse Cards — ポイント・賭け・ショップ・カードパック・コレクション・プロフィール
    ポイントはゲームの中だけのもの（お金では買えない）。
-   保存：この端末のブラウザ＋Firebase の players/<引き継ぎコード>（claude.ai では自分専用の場所）。
+   保存：この端末のブラウザ＋Firebase。Googleでログインしていれば players/<アカウントのuid>、
+   していなければ players/<引き継ぎコード>（claude.ai では自分専用の場所）。
    eclipse-cards.js の後に読み込み、window.Meta として本体から呼ばれる。 */
 (() => {
   const KEY_LS = "eclipse-key", PROF_LS = "eclipse-profile";
@@ -26,6 +27,7 @@
   const PACKS = { card: ["カードパック", 100, "カード5枚（1枚はレア以上）。デッキに入れられるカードが増える"], art: ["絵柄パック", 150, "絵柄違い3つ（キラ・金枠・日蝕版）。強さは変わらない"] };
 
   let prof = null, key = null, saveTimer = 0, armed = "", shopTab = "pack";
+  let user = null;   // Googleでログインしているアカウント（firebase.User）
   const M = { roomBet: 0 };
   const today = () => new Date().toLocaleDateString("sv");   // 2026-10-19 の形
   const pick = list => list[Math.floor(Math.random() * list.length)];
@@ -38,11 +40,14 @@
   /* ---------- 保存と読み込み ---------- */
   function remoteDoc() {
     if (!dbApi) return null;
-    return backend === "claude" ? dbApi.doc(`data/users/${uid}/profile`) : dbApi.doc(`players/${key}`);
+    if (backend === "claude") return dbApi.doc(`data/users/${uid}/profile`);
+    return dbApi.doc(`players/${user ? user.uid : key}`);
   }
+  const owner = () => user ? `google:${user.uid}` : `key:${key}`;   // この保存データが誰のものか
   function save() {
     if (!prof) return;
     prof.updated = Date.now();
+    prof.owner = owner();
     try { localStorage.setItem(PROF_LS, JSON.stringify(prof)); } catch {}
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => { remoteDoc()?.set(prof).catch(() => {}); }, 400);
@@ -65,22 +70,52 @@
   try { const v = JSON.parse(localStorage.getItem(PROF_LS) || "null"); if (v?.name) prof = fix(v); } catch {}
   if (prof && dailyBonus()) bonusMsg = `今日のボーナス +${DAILY_BONUS}pt`;
 
-  /* Firebase などにつながったら、保存してある方を読む（新しい方を使う） */
+  /* Firebase などにつながったら、ログインの状態を確かめてから保存してある方を読む */
   let backendDone = false;
   M.onBackend = async () => {
     if (backendDone || !dbApi) return;
     backendDone = true;
+    if (backend === "firebase" && window.firebase?.auth) {
+      const auth = firebase.auth();
+      user = await new Promise(res => { const off = auth.onAuthStateChanged(u => { off(); res(u); }); });
+      auth.onAuthStateChanged(async u => {   // あとからのログイン・ログアウト
+        if ((u?.uid || null) === (user?.uid || null)) return;
+        user = u;
+        await loadRemote();
+        if ($("dialog").dataset.kind === "profile") showProfile(u ? `${u.displayName || "Googleアカウント"}でログインした。` : "ログアウトした。この端末の保存に戻った。");
+        else refreshHome();
+      });
+    }
+    await loadRemote();
+    refreshHome();
+  };
+  /* 保存場所のデータを読む。ログインしたアカウントにデータがあればそれを使う。
+     なければ今この端末にあるデータをアカウントに移す */
+  async function loadRemote() {
     try {
       const s = await remoteDoc().get();
       const remote = s.exists ? s.data() : null;
-      if (remote?.name && (!prof || (remote.updated || 0) > (prof.updated || 0))) {
+      const mine = prof && prof.owner === owner();
+      if (remote?.name && (!mine || (remote.updated || 0) > (prof.updated || 0))) {
         prof = fix(remote);
         try { localStorage.setItem(PROF_LS, JSON.stringify(prof)); } catch {}
         if (dailyBonus()) bonusMsg = `今日のボーナス +${DAILY_BONUS}pt`;
       } else if (prof) save();
     } catch {}
-    refreshHome();
-  };
+  }
+  async function login() {
+    try { await firebase.auth().signInWithPopup(new firebase.auth.GoogleAuthProvider()); }
+    catch (e) {
+      const why = {
+        "auth/popup-blocked": "ログインの小さい画面がブロックされた。ブラウザでポップアップを許可して、もう一度押そう。",
+        "auth/popup-closed-by-user": "ログインをやめた。",
+        "auth/cancelled-popup-request": "ログインをやめた。",
+        "auth/unauthorized-domain": "このサイトのアドレスが Firebase の「承認済みドメイン」に入っていない。",
+        "auth/operation-not-allowed": "Firebase の Authentication で Google が有効になっていない。",
+      }[e?.code] || `ログインできなかった（${e?.code || e}）。`;
+      showProfile(why);
+    }
+  }
   function refreshHome() {
     if (document.body.dataset.view === "home" && $("overlay").hidden) showHome(bonusMsg, true);
     if (!prof && $("overlay").hidden) showStarter();
@@ -154,8 +189,12 @@
       <span class="p-icon big frame-${c.frame}">${c.icon}</span>
       <span class="prof-main"><b>${esc(prof.name)}</b><small>${c.title}　${prof.stats.win}勝${prof.stats.lose}敗</small></span>
       <span class="prof-pts"><b>${prof.points}</b><small>pt・賭け上限${M.cap()}</small></span>
-    </button>`;
+    </button>${M.loginHTML()}`;
   };
+  const canLogin = () => backend === "firebase" && !!window.firebase?.auth;
+  M.loginHTML = () => !prof || !canLogin() ? "" : user
+    ? `<p class="login-line">Googleでログイン中（${esc(user.displayName || user.email || "")}）。どの端末でも同じデータ。</p>`
+    : `<p class="login-line"><button class="btn small" data-act="login">Googleでログイン</button> どの端末でも同じデータで遊べる</p>`;
   M.tilesHTML = () => `
     <button class="tile" data-act="shop"><b>ショップ</b><span>パック・スリーブ・マット・装飾</span></button>
     <button class="tile" data-act="collection"><b>コレクション</b><span>持っているカードと絵柄</span></button>`;
@@ -294,8 +333,13 @@
       <label class="field">名前 <input id="nameIn" maxlength="12" value="${esc(prof.name)}" autocomplete="off"><button class="btn small" data-act="rename">変える</button></label>
       ${choose("icon")}${choose("title")}${choose("frame")}${choose("sleeve")}${choose("mat")}
       <p>戦績：${prof.stats.win}勝 ${prof.stats.lose}敗 ${prof.stats.draw}分　所持 ${prof.points}pt</p>
-      <h3>引き継ぎコード</h3>
-      ${backend === "claude" ? `<p>claude.ai では自分のアカウントに保存されるので、引き継ぎはいらない。</p>` : `
+      ${canLogin() ? `<h3>Googleでログイン</h3>${user
+        ? `<p>ログイン中：<b>${esc(user.displayName || "")}</b>（${esc(user.email || "")}）。データはこのアカウントに保存され、ほかの端末でもログインすれば同じになる。</p>
+           <button class="btn sub small" data-act="logout">ログアウト</button>`
+        : `<p>ログインすると、どの端末でも同じデータで遊べる。本人以外はデータを書き換えられない。今この端末にあるデータは、はじめてログインしたときにアカウントへ移る。</p>
+           <button class="btn small" data-act="login">Googleでログイン</button>`}` : ""}
+      ${user ? "" : `<h3>引き継ぎコード</h3>`}
+      ${user ? "" : backend === "claude" ? `<p>claude.ai では自分のアカウントに保存されるので、引き継ぎはいらない。</p>` : `
       <p>別の端末やブラウザで同じデータを使うときに入力する。<b>人に教えないこと</b>（知っている人は誰でもこのデータを使える）。</p>
       <div class="roomcode small">${key}</div>
       <div class="join"><input id="keyIn" maxlength="20" placeholder="別の端末のコード" autocomplete="off"><button class="btn sub small" data-act="load-key">このコードのデータを使う</button></div>`}
@@ -337,6 +381,8 @@
       case "profile": showProfile(); return true;
       case "rename": { const v = $("nameIn")?.value.trim(); if (v) { prof.name = v.slice(0, 12); save(); } showProfile("名前を変えた。"); return true; }
       case "load-key": loadKey($("keyIn")?.value); return true;
+      case "login": login(); return true;
+      case "logout": firebase.auth().signOut(); return true;
       case "close": if ($("dialog").dataset.kind !== "starter" && document.body.dataset.view === "home") { showHome(); return true; } return false;
     }
     return false;
