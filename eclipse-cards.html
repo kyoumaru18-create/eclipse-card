@@ -137,8 +137,51 @@ body::before {
 .a-night.t-counter .c-main big, .a-night.t-thorns .c-main big, .a-night.t-bleed .c-main big { color: #ff9a8f; }
 @keyframes rise { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(-36px); } }
 
+/* ホーム画面と盤面の切り替え */
+[data-view="home"] #game { display: none; }
+[data-view="game"] #home { display: none; }
+.home { max-width: 620px; margin: 0 auto; padding: 40px 16px 48px; display: grid; gap: 18px; }
+#homeMain { display: grid; gap: 14px; }
+#homeMain .msg:empty { display: none; }
+.home-head h1 { margin: 0; font-family: var(--f-display); font-weight: 800; font-size: clamp(38px, 11vw, 60px); letter-spacing: .03em; line-height: 1.05; }
+.home-head p { margin: 6px 0 0; color: var(--muted); }
+.home-deck { font-size: 14px; color: var(--muted); }
+.home-deck b { color: var(--ink); }
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.tile { font: inherit; text-align: left; display: grid; gap: 2px; padding: 16px; border-radius: 14px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; backdrop-filter: blur(6px); }
+.tile b { font-family: var(--f-display); font-size: 19px; }
+.tile span { font-size: 12.5px; color: var(--muted); }
+.tile.main { grid-column: 1 / -1; background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.tile.main span { color: var(--accent-ink); opacity: .85; }
+.tile:hover, .tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.cfg { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid rgba(28,34,48,.1); cursor: pointer; }
+.cfg input { width: 20px; height: 20px; margin-top: 2px; accent-color: #b8611a; flex: none; }
+.cfg span { display: grid; } .cfg b { font-size: 15px; color: #1c2230; } .cfg small { font-size: 12.5px; color: #566070; }
+.tut-step { font-size: 12px !important; font-weight: 700; color: #b8611a !important; }
+.tut-body { font-size: 15px !important; line-height: 1.75; color: #1c2230 !important; }
+
+/* 操作バー：残りの枚数とターン終了。選んでいる間は決定・やめる・狙い */
+.act-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.act-row .grow { flex: 1; }
+.turn-chip { font-weight: 700; font-size: 14px; }
+.turn-chip.foe { color: var(--muted); }
+.act-hint { font-size: 12.5px; color: var(--muted); }
+.plays { display: inline-flex; align-items: baseline; gap: 6px; }
+.pip-row { color: var(--accent); font-size: 16px; letter-spacing: 3px; }
+.plays small { font-size: 12.5px; color: var(--muted); }
+.sel-name { font-family: var(--f-display); font-size: 17px; }
+.aim { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+
+/* 相手の場は向かい合わせ：相手は情報が上・場が下（真ん中寄り）、デッキとドロップゾーンが左右逆。自分は場が上 */
+#side-enemy .board { order: 10; }
+#side-enemy .board .deck { order: 3; } #side-enemy .board .slots { order: 2; direction: rtl; } #side-enemy .board .drop { order: 1; }
+#side-enemy .board .slot { direction: ltr; }
+#side-enemy .board { grid-template-columns: 64px 1fr 54px; }
+#side-me .board { order: -1; }
+
 /* guide */
-.guide { display: grid; gap: 8px; border-width: 2px; border-color: var(--accent); }
+.guide { display: grid; gap: 8px; padding: 8px 12px; }
+.guide.mine { border-color: var(--accent); }
 .guide-title { font-weight: 700; font-size: 16px; }
 .guide-text { font-size: 13.5px; color: var(--muted); }
 .guide-text b { color: var(--ink); }
@@ -381,6 +424,9 @@ details.rules ul { margin: 8px 0 4px; padding-left: 1.2em; display: grid; gap: 4
   .st-row { grid-template-columns: 2.3em 1fr; gap: 6px; }
   .st { padding: 2px 7px; } .st small { font-size: 10.5px; }
   .board { grid-template-columns: 44px 1fr 52px; gap: 6px; }
+  #side-enemy .board { grid-template-columns: 52px 1fr 44px; }
+  .home { padding-top: 28px; }
+  .tile { padding: 12px; } .tile b { font-size: 16px; }
   .pile, .slot { min-height: 70px; }
   .pile-n { font-size: 18px; }
   .pile small { font-size: 9px; white-space: nowrap; letter-spacing: -.02em; }
@@ -427,43 +473,9 @@ details.rules ul { margin: 8px 0 4px; padding-left: 1.2em; display: grid; gap: 4
 }
 </style>
 
-<div class="wrap">
-  <header class="top">
-    <div class="brand"><h1>Eclipse Cards</h1></div>
-    <div class="top-btns">
-      <span class="modeflag" id="modeFlag"></span>
-      <button class="btn small" id="howBtn">遊び方</button>
-      <button class="btn small" id="menuBtn">メニュー</button>
-    </div>
-  </header>
-
-  <section class="box sky" aria-label="昼夜の進み">
-    <div class="sky-head"><strong id="phaseName">昼</strong><span id="phaseInfo"></span></div>
-    <div class="track" id="track"></div>
-  </section>
-
-  <section class="box side" id="side-enemy" aria-label="敵"></section>
-  <section class="box side" id="side-me" aria-label="あなた"></section>
-
-  <div class="dock">
-    <div class="bars mybars" aria-label="あなたのゲージ">
-      <span>あなた</span>
-      <span>シールド</span><div class="bar"><i class="sh" id="mini-sh"></i><b class="gh" id="mini-shg"></b></div><output id="mini-sho"></output>
-      <span>HP</span><div class="bar"><i class="hp" id="mini-hp"></i><b class="gh" id="mini-hpg"></b></div><output id="mini-hpo"></output>
-    </div>
-    <section class="box guide" id="guide" aria-live="polite"></section>
-    <section aria-label="手札">
-      <div class="hand-head"><strong>手札</strong><span id="deckInfo"></span></div>
-      <div class="hand" id="hand"></div>
-    </section>
-  </div>
-
-  <details class="box logbox">
-    <summary>ログ（何が起きたかの細かい記録）</summary>
-    <div class="log" id="log"></div>
-  </details>
-
-  <details class="box rules">
+<div class="home" id="home">
+  <div id="homeMain"></div>
+  <details class="box rules home-rules">
     <summary>ルール一覧</summary>
     <ul>
       <li>カードは1ターンに2枚まで使える（「使う」「回復」「奥義を溜める」を数える。秘奥の同時使用は数えない）。「使う」とシールドを消費して効果が出る。足りない分はHPで払う。</li>
@@ -493,6 +505,44 @@ details.rules ul { margin: 8px 0 4px; padding-left: 1.2em; display: grid; gap: 4
       <li>デッキはメニューの「デッキ編集」で組める。36枚ちょうど、同じカードは3枚まで（奥義は4枚まで）。</li>
     </ul>
   </details>
+</div>
+
+<div class="wrap" id="game">
+  <header class="top">
+    <div class="brand"><h1>Eclipse Cards</h1></div>
+    <div class="top-btns">
+      <span class="modeflag" id="modeFlag"></span>
+      <button class="btn small" id="howBtn">遊び方</button>
+      <button class="btn small" id="menuBtn">ホーム</button>
+    </div>
+  </header>
+
+  <section class="box sky" aria-label="昼夜の進み">
+    <div class="sky-head"><strong id="phaseName">昼</strong><span id="phaseInfo"></span></div>
+    <div class="track" id="track"></div>
+  </section>
+
+  <section class="box side" id="side-enemy" aria-label="敵"></section>
+  <section class="box side" id="side-me" aria-label="あなた"></section>
+
+  <div class="dock">
+    <div class="bars mybars" aria-label="あなたのゲージ">
+      <span>あなた</span>
+      <span>シールド</span><div class="bar"><i class="sh" id="mini-sh"></i><b class="gh" id="mini-shg"></b></div><output id="mini-sho"></output>
+      <span>HP</span><div class="bar"><i class="hp" id="mini-hp"></i><b class="gh" id="mini-hpg"></b></div><output id="mini-hpo"></output>
+    </div>
+    <section class="box guide" id="guide" aria-live="polite"></section>
+    <section aria-label="手札">
+      <div class="hand-head"><strong>手札</strong><span id="deckInfo"></span></div>
+      <div class="hand" id="hand"></div>
+    </section>
+  </div>
+
+  <details class="box logbox">
+    <summary>ログ（何が起きたかの細かい記録）</summary>
+    <div class="log" id="log"></div>
+  </details>
+
 </div>
 
 <div class="banner" id="banner" hidden aria-live="assertive"></div>

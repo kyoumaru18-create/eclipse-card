@@ -818,6 +818,14 @@ const AI = {
   chooseReflect(p, amt) { return amt >= 7 || amt > p.shield; },
 };
 
+/* ===== 設定（この端末のブラウザに保存） ===== */
+const CFG_KEY = "eclipse-settings";
+const cfg = { motion: true, confirm2: true, fast: false };
+try { Object.assign(cfg, JSON.parse(localStorage.getItem(CFG_KEY) || "{}")); } catch {}
+function saveCfg() { try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch {} }
+/* AIの「考えている時間」。設定で速くできる */
+function aiWait(ms) { return sleep(cfg.fast ? ms * 0.4 : ms); }
+
 /* ===== 画面の状態 ===== */
 const $ = id => document.getElementById(id);
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -923,7 +931,7 @@ function animateMoves(rects) {
   const cur = viewOf();
   const prev = view;
   view = cur;
-  if (!prev || prev.gid !== cur.gid || reduceMotion) return;
+  if (!prev || prev.gid !== cur.gid || reduceMotion || !cfg.motion) return;
   g.players.forEach((p, i) => {
     const key = sideKey(i);
     const handRect = i === seat ? rectOf("hand") : rectOf(`${key}-handchip`) || rectOf(`side-${key}`);
@@ -1162,55 +1170,35 @@ function selGuideHTML(me) {
   const modes = isOugi(c) ? [["use", "溜める"]] : [["use", "使う"], ["recover", "回復"]];
   const btns = modes.map(([m, label]) => {
     const ok = g.canPlay(me, c, m), on = sel.mode === m;
-    return `<button class="btn${on ? " primary" : ""}" data-act="${m === "use" ? "use" : "rec"}" data-uid="${c.uid}" ${ok ? "" : "disabled"}>${on ? `${label}で決定` : label}</button>`;
+    return `<button class="btn small${on ? " primary" : ""}" data-act="${m === "use" ? "use" : "rec"}" data-uid="${c.uid}" ${ok ? "" : "disabled"}>${on ? `${label}で決定` : label}</button>`;
   }).join("");
-  const warn = sel.mode === "use" && g.players[1 - seat].kyoka && c.type === "attack" && sel.target == null ? `<div class="o-warn">相手は鏡花水月で跳ね返してくるかもしれない</div>` : "";
-  const aim = selAiming() ? `<div class="pairs aim"><span class="aim-label">狙い</span>${[
+  const warn = sel.mode === "use" && g.players[1 - seat].kyoka && c.type === "attack" && sel.target == null ? `<span class="o-warn">鏡花水月で跳ね返されるかも</span>` : "";
+  const aim = selAiming() ? `<span class="aim"><span class="aim-label">狙い</span>${[
     `<button class="btn small${sel.target == null ? " on" : ""}" data-act="aim" data-t="">${nameOf(1 - seat)}</button>`,
-    ...g.players[1 - seat].monsters.map(m => `<button class="btn small${sel.target === m.uid ? " on" : ""}" data-act="aim" data-t="${m.uid}">${m.name}（HP${m.hpNow}）</button>`),
-  ].join("")}</div>` : "";
-  return `<div class="guide-title">${c.name}${sel.mode ? `を${sel.mode === "use" ? (isOugi(c) ? "溜める" : "使う") : "回復に回す"}` : "：使うか回復か選ぼう"}</div>
-    <div class="guide-text">${sel.mode ? `ゲージの点滅している部分が変わる。もう一度押すと決定。${selAiming() ? "相手のモンスターを押すと、そちらを狙える（モンスターにはシールドがない）。" : ""}` : "選ぶと、HPとシールドの変わる部分がゲージで点滅する。"}</div>${aim}${warn}
-    <div class="guide-row"><div class="pairs">${btns}</div><button class="btn" data-act="cancel">やめる</button></div>`;
+    ...g.players[1 - seat].monsters.map(m => `<button class="btn small${sel.target === m.uid ? " on" : ""}" data-act="aim" data-t="${m.uid}">${m.name}</button>`),
+  ].join("")}</span>` : "";
+  const hint = sel.mode ? (cfg.confirm2 ? "点滅している部分が変わる・もう一度押すと決定" : "") : "使うか回復を選ぶ";
+  return `<div class="act-row sel"><b class="sel-name">${c.name}</b>${hint ? `<span class="act-hint">${hint}</span>` : ""}${aim}${warn}
+    <span class="grow"></span>${btns}<button class="btn small" data-act="cancel">やめる</button></div>`;
 }
 
 function myTurnNow() { return !!g && !busy && !g.over && !g.pending && g.turnIdx === seat; }
 
 function guideHTML(me) {
-  if (g.over) return `<div class="guide-title">試合終了</div>`;
-  if (g.pending?.type === "reflect") {
-    return g.pending.seat === seat
-      ? `<div class="guide-title">鏡花水月</div><div class="guide-text">跳ね返すかどうか選ぼう。</div>`
-      : `<div class="guide-title">${nameOf(g.pending.seat)}が鏡花水月を使うか選んでいる</div><div class="guide-text">少し待とう。</div>`;
-  }
-  if (g.turnIdx !== seat) {
-    return mode === "ai"
-      ? `<div class="guide-title">敵のターン</div><div class="guide-text">敵が行動している。少し待とう。</div>`
-      : `<div class="guide-title">相手のターン</div><div class="guide-text">相手が操作している。相手がターンを終えると、ここに反映される。</div>`;
-  }
-  const endBtn = `<button class="btn primary" data-act="end">ターン終了</button>`;
+  const row = inner => `<div class="act-row">${inner}</div>`;
+  if (g.over) return row(`<span class="turn-chip">試合終了</span>`);
+  if (g.pending?.type === "reflect")
+    return row(`<span class="turn-chip">${g.pending.seat === seat ? "鏡花水月：跳ね返すか選ぼう" : `${nameOf(g.pending.seat)}が鏡花水月を使うか選んでいる…`}</span>`);
+  if (g.turnIdx !== seat)
+    return row(`<span class="turn-chip foe">${nameOf(1 - seat)}のターン</span><span class="act-hint">${mode === "ai" ? "行動中…" : "相手の操作を待っている"}</span>`);
   if (selectedCard()) return selGuideHTML(me);
-  if (me.wrath) return `<div class="guide-row"><div><div class="guide-title">怒り状態</div><div class="guide-text">仏の怒りと合掌以外のカードは使えない。攻撃を受けるたびにダメージ-${R.WRATH_REDUCE}（毒と出血は減らない）。待ったターンごとに必殺技が強くなる（今は${finisherBase(me)}）。4枚目の仏の怒りを引いたら使おう。</div></div>${endBtn}</div>`;
+  const left = Math.max(0, R.PLAY_LIMIT - (me.plays || 0));
+  const pips = `<span class="plays" title="このターンに使える残りの枚数（使う・回復・奥義）"><span class="pip-row">${"●".repeat(left)}${"○".repeat(R.PLAY_LIMIT - left)}</span><small>${left ? `あと${left}枚` : "使い切った"}</small></span>`;
   const pairs = g.pairOptions(me);
-  if (pairs.length) {
-    return `<div class="guide-title">今は${PHASE_JP[g.phase]}。昼と夜の指定カードを同時に使うと${HIOU_NAME[me.hiou || "balanced"]}</div>
-      <div class="pairs">${pairs.map(([d, n]) => `<button class="btn" data-act="pair" data-d="${d.uid}" data-n="${n.uid}">${d.name}＋${n.name}を同時に使う（シールド-${g.shieldCost(me, d) + g.shieldCost(me, n)}）</button>`).join("")}</div>
-      <div class="guide-row"><div class="guide-text">組み合わせを選べる。秘奥の同時使用は1ターン${R.PLAY_LIMIT}枚に数えない。${playsLeftText(me)}</div>${endBtn}</div>`;
-  }
-  let hint;
-  if (me.bleed) hint = `<b>出血中</b>：カードを「使う」たびにHP-${R.BLEED_DMG}。応急処置で治せる。`;
-  else if (g.isTransition() && me.buffRound === g.round) hint = "秘奥を獲得した。あとは普通に戦おう。";
-  else if (g.isTransition()) hint = `今は${PHASE_JP[g.phase]}だが、昼と夜の指定カードが手札に揃っていない。日蝕は今2倍。`;
-  else {
-    const [k, nxt] = g.roundsToTransition();
-    hint = `あと${k}巡で${PHASE_JP[nxt]}。昼と夜の<b>指定カード</b>（★の付いたカード）を1枚ずつ手札に残しておこう。`;
-  }
-  return `<div class="guide-row"><div><div class="guide-title">あなたのターン</div>
-    <div class="guide-text"><b>${playsLeftText(me)}</b>（使う・回復・奥義を数える）。${hint}</div></div>${endBtn}</div>`;
-}
-function playsLeftText(p) {
-  const left = Math.max(0, R.PLAY_LIMIT - (p.plays || 0));
-  return left ? `このターンあと${left}枚使える` : "このターンはもうカードを使えない";
+  const pairHTML = pairs.length ? `<div class="pairs"><span class="act-hint"><b>${PHASE_JP[g.phase]}</b>：昼と夜の指定カードを同時に使うと${HIOU_NAME[me.hiou || "balanced"]}（枚数に数えない）</span>
+    ${pairs.map(([d, n]) => `<button class="btn small" data-act="pair" data-d="${d.uid}" data-n="${n.uid}">${d.name}＋${n.name}（シールド-${g.shieldCost(me, d) + g.shieldCost(me, n)}）</button>`).join("")}</div>` : "";
+  const note = me.wrath ? `<span class="act-hint">怒り状態：仏の怒りと合掌だけ使える</span>` : me.bleed ? `<span class="act-hint">出血中：使うたびHP-${R.BLEED_DMG}</span>` : "";
+  return `${pairHTML}${row(`${pips}${note}<span class="grow"></span><button class="btn primary" data-act="end">ターン終了</button>`)}`;
 }
 
 function render() {
@@ -1242,6 +1230,7 @@ function render() {
   const guide = $("guide");
   guide.innerHTML = guideHTML(me);
   guide.classList.toggle("big", myTurn && !sel && g.pairOptions(me).length > 0);
+  guide.classList.toggle("mine", myTurn);
   guide.classList.toggle("picking", !!sel);
 
   $("deckInfo").textContent = `${me.hand.length}枚　デッキ残り${me.deck.length}`;
@@ -1329,7 +1318,7 @@ function showFinish() {
   showDialog(`<h2>${title}</h2><p>${text}獲得した秘奥：${[...me.buffs].map(b => BUFFS[b][0]).join("・") || "なし"}</p>
     <div class="join">
       <button class="btn" data-act="again">${mode === "online" ? "同じ相手ともう一度" : "もう一度遊ぶ"}</button>
-      <button class="btn sub" data-act="menu">メニューへ</button>
+      <button class="btn sub" data-act="menu">ホームへ</button>
     </div>`, "finish");
 }
 
@@ -1472,7 +1461,27 @@ function deckEdit(act, b) {
 }
 
 /* ===== メニュー ===== */
-function showMenu(msg = "", ok = false) {
+/* ===== ホーム画面（AI対戦・オンライン・デッキ編集・チュートリアル・設定） ===== */
+let playing = false;   // 試合を始めたか（「続きから」を出す）
+function setView(v) { document.body.dataset.view = v; if (v === "game") render(); }
+function showHome(msg = "", ok = false) {
+  hideDialog();
+  setView("home");
+  const cont = playing && g && !g.over ? `<button class="tile main" data-act="continue"><b>続きから</b><span>${mode === "online" ? `オンライン・部屋 ${room?.code || ""}` : "AI対戦"}の試合に戻る</span></button>` : "";
+  $("homeMain").innerHTML = `
+    <header class="home-head"><h1>Eclipse Cards</h1><p>昼と夜がめぐる、シールドの駆け引きのカードバトル</p></header>
+    <div class="home-deck">使うデッキ：<b>${myDeck.name}</b>（${deckSize(myDeck.cards)}枚・${HIOU_NAME[deckType(myDeck.cards)]}）</div>
+    <div class="tiles">
+      ${cont}
+      <button class="tile main" data-act="ai"><b>AIと対戦</b><span>新しい試合を始める</span></button>
+      <button class="tile" data-act="online"><b>オンライン対戦</b><span>部屋を作る・コードで入る</span></button>
+      <button class="tile" data-act="deck"><b>デッキ編集</b><span>36枚のデッキを組む</span></button>
+      <button class="tile" data-act="tutorial"><b>チュートリアル</b><span>遊び方を順番に</span></button>
+      <button class="tile" data-act="settings"><b>設定</b><span>演出・操作・AIの速さ</span></button>
+    </div>
+    <p class="msg${ok ? " ok" : ""}" id="homeMsg">${msg}</p>`;
+}
+function showOnline(msg = "", ok = false) {
   const saved = loadSavedRoom();
   let online;
   if (onlineState === "loading") online = `<p>オンライン対戦を準備中…</p>`;
@@ -1487,16 +1496,41 @@ function showMenu(msg = "", ok = false) {
       <input id="codeIn" maxlength="4" placeholder="コード" autocomplete="off" aria-label="部屋コード">
       <button class="btn sub" data-act="join">コードで入る</button>
     </div>`;
-  showDialog(`<h2>Eclipse Cards</h2>
-    ${howToHTML()}
-    <h3>デッキ</h3>
-    <div class="join"><span class="deckname">使うデッキ：<b>${myDeck.name}</b>（${deckSize(myDeck.cards)}枚・${HIOU_NAME[deckType(myDeck.cards)]}）</span>
-      <button class="btn sub" data-act="deck">デッキ編集</button></div>
-    <h3>AIと対戦</h3>
-    <div class="join"><button class="btn" data-act="ai">AIと対戦する</button></div>
-    <h3>オンライン対戦</h3>
+  showDialog(`<h2>オンライン対戦</h2>
+    <p>部屋を作ってコードを相手に伝えるか、相手のコードで入る。デッキは「${myDeck.name}」を使う。</p>
     ${online}
-    <p class="msg${ok ? " ok" : ""}" id="menuMsg">${msg}</p>`, "menu");
+    <p class="msg${ok ? " ok" : ""}" id="menuMsg">${msg}</p>
+    <button class="btn sub" data-act="home">ホームへ</button>`, "online");
+}
+function showSettings() {
+  const opt = (key, label, desc) => `<label class="cfg"><input type="checkbox" data-cfg="${key}" ${cfg[key] ? "checked" : ""}><span><b>${label}</b><small>${desc}</small></span></label>`;
+  showDialog(`<h2>設定</h2>
+    ${opt("motion", "カードの動き", "ドロー・コール・ドロップゾーンへの移動を動きで見せる")}
+    ${opt("confirm2", "2回押して決定", "1回目でHP・シールドの変化をゲージで見せ、もう一度押すと使う。切ると1回で使う")}
+    ${opt("fast", "AIを速くする", "AIが考える時間を短くする")}
+    <p>設定はこの端末のブラウザに保存される。</p>
+    <button class="btn" data-act="close">閉じる</button>`, "settings");
+}
+/* チュートリアル：1ページずつ */
+const TUTORIAL = [
+  ["勝ち方", `相手の<b>HP（${R.MAX_HP}）を0</b>にしたら勝ち。受けたダメージはまず<b>シールド</b>が受け止め、0になるとHPに通る。<br>シールドは<b>カードを使うコスト</b>でもある。攻めるほど守りが薄くなる。`],
+  ["カードを使う", `1ターンに使えるのは<b>${R.PLAY_LIMIT}枚まで</b>。毎ターン2枚引く。<br><b>使う</b>：シールドを払って効果を出す（足りない分はHPで払う）。<br><b>回復</b>：効果は出さず、そのカードを捨ててシールドを増やす。`],
+  ["2回押して決定", `カードを押すと浮かび上がる。「使う」か「回復」を押すと、<b>HPとシールドの変わる部分がゲージで点滅</b>する。<br>同じボタンを<b>もう一度押すと決定</b>。やめるときは「やめる」。`],
+  ["場とモンスター", `陽の狼・夜の梟は<b>場にコール</b>するモンスター（最大2体）。ターン終了時に相手を攻撃する。<br>攻撃カードを選んだら<b>相手のモンスターを押して狙える</b>。モンスターにはシールドがなく、HPが0になると<b>破壊されてドロップゾーン</b>へ。`],
+  ["デッキとドロップゾーン", `使ったカードはドロップゾーンへ行く。デッキが0枚になると、ドロップゾーンをシャッフルしてデッキに戻す。<br>ドロップゾーンを押すと中身が見られる。`],
+  ["昼と夜", `${PHASE_ROUNDS}巡ごとに昼と夜が入れ替わる。<b>昼カードは昼に、夜カードは夜に1.5倍</b>。<br>その間の<b>日没・夜明け</b>に、昼と夜の<b>指定カード（★）</b>を1枚ずつ同時に使うと、試合中ずっと続く<b>秘奥</b>がもらえる。`],
+  ["奥義", `仏の怒り・天照などの<b>奥義</b>は、使うと溜まり、<b>4枚目で必殺技</b>。溜めている間も少しずつ効果がある。<br>同じ奥義は1ターンに1枚まで。`],
+  ["準備完了", `あとは試しながら覚えよう。「AIと対戦」から始められる。デッキは「デッキ編集」で36枚に組める。`],
+];
+function showTutorial(i = 0) {
+  const [title, body] = TUTORIAL[i];
+  showDialog(`<p class="tut-step">${i + 1} / ${TUTORIAL.length}</p><h2>${title}</h2><p class="tut-body">${body}</p>
+    <div class="join">
+      ${i > 0 ? `<button class="btn sub" data-act="tut" data-step="${i - 1}">前へ</button>` : ""}
+      ${i < TUTORIAL.length - 1 ? `<button class="btn" data-act="tut" data-step="${i + 1}">次へ</button>`
+        : `<button class="btn" data-act="ai">AIと対戦する</button>`}
+      <button class="btn sub" data-act="close">閉じる</button>
+    </div>`, "tutorial");
 }
 
 /* ===== AI対戦 ===== */
@@ -1509,7 +1543,8 @@ function startAI() {
   g = new Game({ ai: [false, true], firstIdx: Math.random() < 0.5 ? 0 : 1, decks: [myDeck.cards, enemy.cards], designated: [myDeck.designated, null] });
   g.log(`試合開始。先攻は@${g.firstIdx}。@0のデッキ：${myDeck.name}／@1のデッキ：${enemy.name}`, "phase");
   hideDialog();
-  render();
+  playing = true; sel = null;
+  setView("game");
   runAITurn(gameId);
 }
 async function runAITurn(id) {
@@ -1521,7 +1556,7 @@ async function runAITurn(id) {
   if (g.over) return finish();
   if (!p.isAI) { busy = false; render(); return; }
   busy = true; render();
-  await sleep(700);
+  await aiWait(700);
   for (let i = 0; i < 80 && !g.over; i++) {
     if (id !== gameId) return;
     const a = AI.pick(g, p);
@@ -1536,14 +1571,14 @@ async function runAITurn(id) {
       if (id !== gameId) return;
       render();
     }
-    await sleep(850);
+    await aiWait(850);
   }
   if (id !== gameId) return;
   if (g.over) return finish();
   g.endTurn(p);
   render();
   if (g.over) return finish();
-  await sleep(500);
+  await aiWait(500);
   runAITurn(id);
 }
 function finish() { busy = false; render(); setTimeout(showFinish, 900); }
@@ -1647,10 +1682,11 @@ async function connectFirebase(config) {
   }
   onlineState = backend ? "on" : "off";
   await loadCloudDeck();
-  if ($("dialog").dataset.kind === "menu") showMenu();
+  if ($("dialog").dataset.kind === "online") showOnline();
+  else if (document.body.dataset.view === "home") showHome();
 })();
 
-function menuMsg(text, ok = false) { const el = $("menuMsg"); if (el) { el.textContent = text; el.classList.toggle("ok", ok); } }
+function menuMsg(text, ok = false) { const el = $("menuMsg") || $("homeMsg"); if (el) { el.textContent = text; el.classList.toggle("ok", ok); } }
 function newCode() { return Array.from({ length: 4 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join(""); }
 function dbErr(e) {
   const c = e?.code;
@@ -1721,10 +1757,10 @@ function enterRoom(code, ref) {
   gameId++;   // 走っているAI戦を止める
   leaveRoom();
   mode = "online"; busy = false;
-  room = { code, ref, unsub: null };
+  room = { code, ref, unsub: null, shown: false };
   storeRoom(code);
   room.unsub = ref.onSnapshot(onRoomSnap, () => {
-    showMenu("部屋との接続が切れた。「部屋に戻る」から入り直そう。");
+    showHome("部屋との接続が切れた。「部屋に戻る」から入り直そう。");
   });
 }
 
@@ -1735,7 +1771,7 @@ function onRoomSnap(snap) {
   room.hostDeck = d.hostDeck ?? null; room.guestDeck = d.guestDeck ?? null;
   room.hostDes = d.hostDes ?? null; room.guestDes = d.guestDes ?? null;
   const mySeat = d.hostId === uid ? 0 : d.guestId === uid ? 1 : null;
-  if (mySeat === null) { storeRoom(""); leaveRoom(); return showMenu("この部屋の参加者ではない。"); }
+  if (mySeat === null) { storeRoom(""); leaveRoom(); return showHome("この部屋の参加者ではない。"); }
   seat = mySeat;
   // 自分の書き込みの反映や古い状態は無視。同じ番号でも相手が書いたもの（同時の再戦など）は相手の版に合わせる
   const sq = d.seq || 0;
@@ -1744,7 +1780,9 @@ function onRoomSnap(snap) {
   g = Game.load(d.state);
   busy = false;
   const kind = $("dialog").dataset.kind;
-  if (kind === "waiting" || kind === "finish" || kind === "menu") hideDialog();
+  if (kind === "waiting" || kind === "finish" || kind === "online") hideDialog();
+  playing = true;
+  if (!room.shown) { room.shown = true; setView("game"); }   // 試合が始まったら（入り直したら）盤面へ
   render();
   if (g.over) return finish();
   if (g.pending) showPending();
@@ -1779,7 +1817,8 @@ function rematch() {
 /* 1回目：そのカードを浮かせて、ゲージに見込みを出す。同じボタンをもう一度押すと決定 */
 function choose(uid, m) {
   if (!myTurnNow()) return;
-  if (sel?.uid === uid && sel.mode === m) { const t = sel.target ?? null; sel = null; humanPlay(uid, m, t); return; }
+  // 設定で「2回押して決定」を切っていれば、1回で使う（狙いは相手プレイヤー）
+  if (!cfg.confirm2 || (sel?.uid === uid && sel.mode === m)) { const t = sel?.uid === uid ? sel.target ?? null : null; sel = null; humanPlay(uid, m, t); return; }
   sel = { uid, mode: m, target: sel?.uid === uid ? sel.target ?? null : null };
   render();
 }
@@ -1804,15 +1843,20 @@ document.addEventListener("click", e => {
   else if (act === "close") hideDialog();
   else if (act === "deck") showDeckEditor();
   else if (act === "dk-plus" || act === "dk-minus" || act === "dk-preset" || act === "dk-des") deckEdit(act, b);
-  else if (act === "dk-save") { saveDeck(draft); showMenu(`「${myDeck.name}」を保存した。次の試合から使われる。`, true); }
+  else if (act === "dk-save") { saveDeck(draft); showHome(`「${myDeck.name}」を保存した。次の試合から使われる。`, true); }
   else if (act === "ai") startAI();
   else if (act === "mkroom") createRoom();
   else if (act === "join") joinRoom($("codeIn")?.value);
   else if (act === "resume") joinRoom(loadSavedRoom());
-  else if (act === "menu") { if ($("dialog").dataset.kind === "waiting") { leaveRoom(); storeRoom(""); } showMenu(); }
+  else if (act === "menu" || act === "home") { if ($("dialog").dataset.kind === "waiting") { leaveRoom(); storeRoom(""); } showHome(); }
+  else if (act === "continue") { hideDialog(); setView("game"); if (g.pending) showPending(); }
+  else if (act === "online") showOnline();
+  else if (act === "tutorial") showTutorial(0);
+  else if (act === "tut") showTutorial(+b.dataset.step);
+  else if (act === "settings") showSettings();
   else if (act === "again") mode === "online" ? rematch() : startAI();
   else if (b.id === "howBtn") showHowTo();
-  else if (b.id === "menuBtn") showMenu();
+  else if (b.id === "menuBtn") showHome();
   else if (b.dataset.reflect) {
     if (g.pending?.type !== "reflect" || g.pending.seat !== seat) return;
     g.resolveReflect(b.dataset.reflect === "yes");
@@ -1825,12 +1869,18 @@ document.addEventListener("click", e => {
   else if (b.dataset.buff) { g.applyBuff(g.players[seat], b.dataset.buff); hideDialog(); afterMyAction(); }
   else if (b.dataset.search) { g.applySearch(g.players[seat], +b.dataset.search); hideDialog(); afterMyAction(); }
 });
+document.addEventListener("change", e => {   // 設定のチェック
+  const k = e.target.dataset?.cfg;
+  if (!k) return;
+  cfg[k] = e.target.checked; saveCfg();
+  if (k === "confirm2") { sel = null; render(); }
+});
 document.addEventListener("keydown", e => {
   if (e.key === "Enter" && e.target.id === "codeIn") joinRoom(e.target.value);
   if (e.key === "Escape" && sel) { sel = null; render(); }
 });
 
-/* 最初はメニューを出す。裏ではAI戦の盤面を用意しておく */
+/* 最初はホーム画面を出す。裏ではAI戦の盤面を用意しておく */
 g = new Game({ ai: [false, true], firstIdx: 0 });
 render();
-showMenu();
+showHome();
