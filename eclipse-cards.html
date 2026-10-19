@@ -175,13 +175,51 @@ body::before {
 .stack b { font-size: 13px; } .stack small { font-size: 11px; opacity: .9; }
 .pips { letter-spacing: 2px; font-size: 12px; }
 .pips.gold { color: #f0cf73; }
-.mon { display: grid; grid-template-columns: auto auto; column-gap: 8px; align-items: baseline; padding: 5px 10px; border-radius: 9px; border: 2px solid; min-width: 9em; line-height: 1.3; }
-.mon b { font-size: 13px; grid-column: 1 / -1; }
-.mon .mon-atk { font-family: var(--f-display); font-size: 22px; font-weight: 800; }
-.mon small { font-size: 10.5px; opacity: .8; }
-.mon.a-day { background: #fbf3df; border-color: #d9a441; color: #2a2010; }
-.mon.a-night { background: #1f2453; border-color: #7f8cff; color: #e8eaff; }
-.mon.a-none, .mon.a-both { background: #ebe8e2; border-color: #9c958a; color: #26231e; }
+/* 盤面：デッキの山・場（モンスター2枠）・ドロップゾーン */
+.board { display: grid; grid-template-columns: 54px 1fr 64px; gap: 8px; align-items: stretch; }
+.pile { display: grid; place-items: center; align-content: center; gap: 0; border-radius: 9px; padding: 6px 4px; min-height: 84px; font: inherit; color: var(--ink); line-height: 1.2; text-align: center; }
+.pile.deck { background: repeating-linear-gradient(135deg, #3a2f5c 0 6px, #2c2348 6px 12px); color: #f3ecff; border: 2px solid #8f7cc9; box-shadow: 2px 2px 0 #1d1733, 4px 4px 0 rgba(29,23,51,.5); }
+.pile.drop { background: var(--track); border: 2px dashed var(--line); cursor: pointer; }
+.pile.drop:hover, .pile.drop:focus-visible { border-color: var(--accent); outline: none; }
+.pile-n { font-family: var(--f-display); font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.pile small { font-size: 10.5px; opacity: .85; }
+.pile em { font-style: normal; font-size: 10px; font-weight: 700; margin-top: 3px; padding: 1px 4px; border-radius: 4px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pile em.a-day { background: #fbf3df; color: #2a2010; } .pile em.a-night { background: #1f2453; color: #e8eaff; }
+.pile em.a-none, .pile em.a-both { background: #ebe8e2; color: #26231e; }
+.slots { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.slot { border-radius: 10px; min-height: 84px; padding: 6px 8px; display: grid; align-content: start; gap: 2px; line-height: 1.25; }
+.slot.empty { border: 2px dashed var(--line); place-items: center; align-content: center; color: var(--muted); }
+.slot.mon { border: 2px solid; }
+.slot.mon.a-day { background: #fbf3df; border-color: #d9a441; color: #2a2010; }
+.slot.mon.a-night { background: #1f2453; border-color: #7f8cff; color: #e8eaff; }
+.slot.mon.a-none, .slot.mon.a-both { background: #ebe8e2; border-color: #9c958a; color: #26231e; }
+.m-name { font-size: 13px; }
+.m-atk { font-family: var(--f-display); font-size: 20px; font-weight: 800; }
+.m-hp { font-size: 11px; font-variant-numeric: tabular-nums; }
+.m-hp b.down { color: var(--bad); }
+.a-night .m-hp b.down { color: #ff9a8f; }
+.mbar { height: 7px; background: rgba(0,0,0,.15); }
+.mbar .mhp, .gh.mhp { background: #d2453b; }
+.a-night .mbar { background: rgba(255,255,255,.18); }
+.slot.aimable { cursor: pointer; box-shadow: 0 0 0 3px var(--accent); }
+.slot.aimed { box-shadow: 0 0 0 4px var(--accent), 0 0 18px var(--accent); transform: translateY(-3px); }
+.aim { align-items: center; }
+.aim-label { font-size: 12px; font-weight: 700; color: var(--muted); }
+.btn.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+/* 飛んでいくカード */
+.flyer { position: fixed; z-index: 30; width: 60px; height: 84px; border-radius: 8px; border: 2px solid; pointer-events: none;
+  display: grid; place-items: center; text-align: center; font-size: 12px; font-weight: 700; padding: 4px; box-shadow: 0 8px 18px rgba(0,0,0,.3); }
+.flyer.a-day { background: #fbf3df; border-color: #d9a441; color: #2a2010; }
+.flyer.a-night { background: #1f2453; border-color: #7f8cff; color: #e8eaff; }
+.flyer.a-none, .flyer.a-both { background: #ebe8e2; border-color: #9c958a; color: #26231e; }
+.flyer.back { background: repeating-linear-gradient(135deg, #3a2f5c 0 6px, #2c2348 6px 12px); border-color: #8f7cc9; }
+/* ドロップゾーンの中身 */
+.drop-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.drop-card { display: grid; padding: 4px 9px; border-radius: 8px; border: 2px solid; line-height: 1.3; }
+.drop-card b { font-size: 13px; } .drop-card small { font-size: 11px; opacity: .8; }
+.drop-card.a-day { background: #fbf3df; border-color: #d9a441; color: #2a2010; }
+.drop-card.a-night { background: #1f2453; border-color: #7f8cff; color: #e8eaff; }
+.drop-card.a-none, .drop-card.a-both { background: #ebe8e2; border-color: #9c958a; color: #26231e; }
 
 /* カードを選ぶ：浮かび上がり、ゲージに見込みが重なる。同じボタンをもう一度押すと決定 */
 .bar { position: relative; }
@@ -342,8 +380,12 @@ details.rules ul { margin: 8px 0 4px; padding-left: 1.2em; display: grid; gap: 4
   .result { font-size: 12px; }
   .st-row { grid-template-columns: 2.3em 1fr; gap: 6px; }
   .st { padding: 2px 7px; } .st small { font-size: 10.5px; }
-  .mon { min-width: 0; padding: 4px 8px; }
-  .mon .mon-atk { font-size: 18px; }
+  .board { grid-template-columns: 44px 1fr 52px; gap: 6px; }
+  .pile, .slot { min-height: 70px; }
+  .pile-n { font-size: 18px; }
+  .pile small { font-size: 9px; white-space: nowrap; letter-spacing: -.02em; }
+  .slot { padding: 4px 6px; }
+  .m-name { font-size: 12px; } .m-atk { font-size: 16px; }
   /* 自分のゲージは手札の帯に隠れやすいので、帯の一番上にも出す */
   .mybars { display: grid; grid-template-columns: auto auto 1fr auto auto 1fr auto; padding: 0 2px; }
   .mybars > span:first-child { font-weight: 700; color: var(--ink); }
@@ -439,7 +481,8 @@ details.rules ul { margin: 8px 0 4px; padding-left: 1.2em; display: grid; gap: 4
       <li>天照：10ダメージ＋以降、自分の昼カードは夜でも1.5倍。月読：10ダメージ＋以降、相手のシールド回復量が半分・自分の夜カードは昼でも1.5倍。</li>
       <li>蠱毒：相手に毒8＋以降、自分が与える毒と出血のダメージが3倍。鏡花水月：以降、相手の攻撃カードを受けるときに1回だけ、1.5倍にして跳ね返すかを選べる（跳ね返すと自分は無傷）。</li>
       <li>自傷：血刃（HPを3払って8ダメージ）・狂血（減ったHP4ごとにダメージ+1）・血の盾（HPを4払ってシールド+8）・再生（4ターンの間、毎ターンHP+3）。血の契約（HPを5払って2枚引く）・返り血（HPを3払って4ダメージ、与えた分シールド回復）・鮮血の舞（HPを3払って4ダメージ、HPが半分以下なら2倍）。奥義の修羅は4枚目でHP10回復＋以降、HPを払うカードのダメージが1.25倍。</li>
-      <li>召喚したモンスターは最大2体。自分のターン終了時に攻撃し、3ターンで去る。</li>
+      <li>モンスター（陽の狼・夜の梟：攻撃3・HP8）は場にコールする（最大2体）。自分のターン終了時に相手を攻撃する。攻撃カードは相手プレイヤーか相手のモンスターを狙える。モンスターにはシールドがなく、HPが0になると破壊されてドロップゾーンへ（反撃・見切り・鏡花水月・毒はモンスターを狙ったときは働かない）。</li>
+      <li>使ったカードはドロップゾーンへ行く。デッキが0枚になると、ドロップゾーンをシャッフルしてデッキに戻す。ドロップゾーンを押すと中身が見られる。</li>
       <li>吸血：与えたダメージの半分だけHP回復。捨て身：大ダメージだが自分もHP-3。日蝕：日没・夜明けに2倍。</li>
       <li>裂傷：相手を3ターン出血させる。出血中はカードを「使う」たびにHP-2。応急処置で治る。</li>
       <li>反撃の構え：次の自分のターンまでに受ける最初の攻撃を半分にし、残り半分を相手に返す。</li>
