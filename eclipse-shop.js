@@ -390,4 +390,5 @@
   window.Meta = M;
   /* 本体のホーム画面は先に描かれているので、ポイントの表示を入れて描き直す */
   if (document.body.dataset.view === "home") { showHome(bonusMsg, true); if (!prof) showStarter(); }
+  if (onlineState === "on") M.onBackend();   // 通信の準備がこのファイルより先に終わっていた場合
 })();
