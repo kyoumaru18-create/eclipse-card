@@ -192,10 +192,12 @@ function autoDesignated(def, chosen) {
   }
   return out;
 }
-function newPlayer(name, isAI, def, chosen) {
+/* cos：見た目 { name, icon, title, frame, sleeve, mat, arts: {カードid: 絵柄} }（ショップで買ったもの。強さには関係しない） */
+function newPlayer(name, isAI, def, chosen, cos = null) {
   const deck = makeDeck(def);
+  for (const c of deck) if (cos?.arts?.[c.id]) c.art = cos.arts[c.id];
   const designated = autoDesignated(sanitizeDeck(def), chosen);
-  return { name, isAI, hp: R.MAX_HP, shield: R.START_SHIELD, deck, hand: [], drop: [], monsters: [],
+  return { name, isAI, cos, hp: R.MAX_HP, shield: R.START_SHIELD, deck, hand: [], drop: [], monsters: [],
            stacks: {},          // 奥義ごとに溜めたカード
            stackUsed: [],       // このターンに使った奥義
            buffs: new Set(), buffRound: null, poison: 0, bleed: 0, counter: false, wrath: false, designated,
@@ -224,9 +226,9 @@ function finisherBase(p) { return R.FINISH_DMG + R.WAIT_BONUS * (p.wrathTurns ||
    プレイヤー名は "@0" "@1" の記号で記録し、画面に出すときに見る人ごとに「あなた」「相手」に置き換える。
    ログの1行1行が演出（ダメージ表示・大きな文字）の元になるので、相手の画面でも同じ演出が再現される ===== */
 class Game {
-  constructor({ ai = [false, false], firstIdx = 0, decks = [DECK, DECK], designated = [null, null] } = {}) {
+  constructor({ ai = [false, false], firstIdx = 0, decks = [DECK, DECK], designated = [null, null], cos = [null, null] } = {}) {
     this.gid = Math.random().toString(36).slice(2, 10);
-    this.players = [newPlayer("@0", ai[0], decks[0], designated[0]), newPlayer("@1", ai[1], decks[1], designated[1])];
+    this.players = [newPlayer("@0", ai[0], decks[0], designated[0], cos[0]), newPlayer("@1", ai[1], decks[1], designated[1], cos[1])];
     this.firstIdx = firstIdx; this.turnIdx = firstIdx;
     this.round = 1; this.over = false; this.winnerIdx = null; this.pending = null; this.logs = []; this.logSeq = 0;
     for (const p of this.players) this.draw(p, R.START_HAND);
@@ -904,10 +906,10 @@ function viewOf() {
 const center = r => [r.left + r.width / 2, r.top + r.height / 2];
 function rectOf(id) { const el = $(id); return el ? el.getBoundingClientRect() : null; }
 /* from の位置から to の位置へ、小さなカードを飛ばす（face が null なら裏向き） */
-function fly(from, to, face, delay = 0) {
+function fly(from, to, face, delay = 0, sleeve = "basic") {
   if (!from || !to) return;
   const el = document.createElement("div");
-  el.className = `flyer ${face ? `a-${face.attr}` : "back"}`;
+  el.className = `flyer ${face ? `a-${face.attr}${face.art ? ` art-${face.art}` : ""}` : `back sleeve-${sleeve}`}`;
   el.textContent = face ? face.name : "";
   document.body.appendChild(el);
   const [fx, fy] = center(from), [tx, ty] = center(to);
@@ -949,7 +951,7 @@ function animateMoves(rects) {
       let d = 0;
       for (const c of p.hand) if (!prev.hand.has(c.uid)) arrive(document.querySelector(`[data-pick="${c.uid}"]`), deckRect, 120 * d++);
     } else {
-      for (let d = 0; d < Math.max(0, prev.deckN[i] - cur.deckN[i]); d++) fly(deckRect, handRect, null, 120 * d);
+      for (let d = 0; d < Math.max(0, prev.deckN[i] - cur.deckN[i]); d++) fly(deckRect, handRect, null, 120 * d, p.cos?.sleeve || "basic");
     }
   });
 }
@@ -958,7 +960,7 @@ function showDrop(i) {
   const p = g.players[i];
   const list = [...p.drop].reverse();
   showDialog(`<h2>${nameOf(i)}のドロップゾーン（${list.length}枚）</h2>
-    ${list.length ? `<div class="drop-list">${list.map(c => `<span class="drop-card a-${c.attr}"><b>${c.name}</b><small>${ATTR_JP[c.attr]}・${TYPE_JP[c.type]}</small></span>`).join("")}</div>`
+    ${list.length ? `<div class="drop-list">${list.map(c => `<span class="drop-card a-${c.attr}${c.art ? ` art-${c.art}` : ""}"><b>${c.name}</b><small>${ATTR_JP[c.attr]}・${TYPE_JP[c.type]}</small></span>`).join("")}</div>`
       : `<p>まだ何もない。</p>`}
     <p>デッキが0枚になると、ドロップゾーンのカードをシャッフルしてデッキに戻す。</p>
     <button class="btn" data-act="close">閉じる</button>`, "drop");
@@ -1052,7 +1054,7 @@ function renderBoard(key, p, mons = null) {
     const per = g.incoming(o, g.outgoing(p, m.power, g.attrMult(m.attr, p)));
     const now = Math.max(0, m.hpNow), after = mons && m.uid in mons ? Math.max(0, mons[m.uid]) : now;
     const a = now / m.hp * 100, b = after / m.hp * 100;
-    return `<div class="slot mon a-${m.attr}${aiming ? " aimable" : ""}${aiming && sel.target === m.uid ? " aimed" : ""}" data-mon="${m.uid}"${aiming ? ` data-aim="${m.uid}"` : ""}>
+    return `<div class="slot mon a-${m.attr}${m.art ? ` art-${m.art}` : ""}${aiming ? " aimable" : ""}${aiming && sel.target === m.uid ? " aimed" : ""}" data-mon="${m.uid}"${aiming ? ` data-aim="${m.uid}"` : ""}>
       <b class="m-name">${m.name}</b>
       <span class="m-atk" title="ターン終了時に相手を攻撃">攻${per}</span>
       <div class="bar mbar"><i class="mhp" style="width:${Math.min(a, b)}%"></i><b class="gh mhp${b < a ? " loss" : ""}" style="left:${b}%;width:${Math.max(0, a - b)}%"></b></div>
@@ -1061,14 +1063,17 @@ function renderBoard(key, p, mons = null) {
   }).join("");
   const top = p.drop[p.drop.length - 1];
   $(`${key}-board`).innerHTML = `
-    <div class="pile deck" id="${key}-deck"><span class="pile-n">${p.deck.length}</span><small>デッキ</small></div>
+    <div class="pile deck sleeve-${p.cos?.sleeve || "basic"}" id="${key}-deck"><span class="pile-n">${p.deck.length}</span><small>デッキ</small></div>
     <div class="slots">${slots}</div>
     <button class="pile drop" id="${key}-drop" data-act="drop" data-seat="${i}" aria-label="${nameOf(i)}のドロップゾーンを見る">
       <span class="pile-n">${p.drop.length}</span><small>ドロップ</small>${top ? `<em class="a-${top.attr}">${top.name}</em>` : ""}</button>`;
 }
 function renderSide(key, p, pv = null, mons = null) {
   const i = g.idx(p);
-  const head = [`<span class="side-name">${nameOf(i)}</span>`];
+  const cos = p.cos || {};
+  const head = [`<span class="side-name">${cos.icon ? `<span class="p-icon frame-${cos.frame || "plain"}">${cos.icon}</span>` : ""}${nameOf(i)}${mode === "online" && i !== seat && cos.name ? `<small>（${cos.name}）</small>` : ""}</span>`];
+  if (cos.title) head.push(`<span class="chip p-title">${cos.title}</span>`);
+  $(`side-${key}`).dataset.mat = cos.mat || "basic";
   if (i !== seat) head.push(`<span class="chip" id="${key}-handchip">手札${p.hand.length}枚</span>`);
   $(`${key}-head`).innerHTML = head.join("");
   renderBars(key, p, pv);
@@ -1247,7 +1252,7 @@ function render() {
       : isOugi(c) ? `<span>溜める</span>${me.stackUsed.includes(c.id) ? "<span>今ターンは使用済み</span>" : ""}`
       : `<span>使う</span><span>${[cost ? `シールド-${cost}${short ? `（HP-${short}）` : ""}` : "", c.hpcost ? `HP-${c.hpcost}` : ""].filter(Boolean).join("・") || "消費なし"}</span>`;
     const recLabel = armed("recover") ? `<span>決定する</span>` : `<span>回復</span><span>シールド+${c.recover}</span>`;
-    return `<div class="card a-${c.attr} t-${c.type}${canUse || canRec ? "" : " off"}${picked ? " lifted" : sel ? " dim" : ""}" data-pick="${c.uid}">
+    return `<div class="card a-${c.attr} t-${c.type}${c.art ? ` art-${c.art}` : ""}${canUse || canRec ? "" : " off"}${picked ? " lifted" : sel ? " dim" : ""}" data-pick="${c.uid}">
       ${mark ? `<span class="c-mark">${mark}</span>` : ""}
       <span class="c-top"><span>${special ? "特殊" : ATTR_JP[c.attr] + "属性"}</span><span>${TYPE_JP[c.type]}</span></span>
       <span class="c-name">${c.name}</span>
@@ -1310,12 +1315,13 @@ function showPending() {
   }
 }
 
-function showFinish() {
+function showFinish(pay = null) {
   const me = g.players[seat];
   const [title, text] = g.winnerIdx === seat ? ["勝利", `第${g.round}巡で${nameOf(1 - seat)}を倒した。`]
     : g.winnerIdx != null ? ["敗北", `第${g.round}巡で倒された。`]
     : ["引き分け", "決着がつかなかった。"];
   showDialog(`<h2>${title}</h2><p>${text}獲得した秘奥：${[...me.buffs].map(b => BUFFS[b][0]).join("・") || "なし"}</p>
+    ${pay ? `<p class="pay">${pay.bet ? `賭け ${pay.bet}pt ／ ` : ""}<b>+${pay.gain}pt</b>　所持 ${pay.points}pt</p>` : ""}
     <div class="join">
       <button class="btn" data-act="again">${mode === "online" ? "同じ相手ともう一度" : "もう一度遊ぶ"}</button>
       <button class="btn sub" data-act="menu">ホームへ</button>
@@ -1395,17 +1401,19 @@ function renderDeckEditor() {
   const chosen = draft.designated || {};
   const finalDes = autoDesignated(def, chosen);   // 選んでいない分は自動で埋めた結果
   const desName = attr => finalDes[attr].map(id => `${CARDS[id].name}${(chosen[attr] || []).includes(id) ? "" : "（自動）"}`).join("・") || "なし";
+  const own = id => window.Meta ? Meta.owned(id) : maxCopies(id);   // 持っている枚数（ショップのカードパックで増える）
   const row = (id, c) => {
     const n = def[id] || 0;
+    const has = Math.min(own(id), maxCopies(id));
     const canDes = (c.attr === "day" || c.attr === "night") && !isOugi(c);
     const isDes = canDes && (chosen[c.attr] || []).includes(id);
     return `<div class="dk-row">
-      <div class="dk-info"><b>${c.name}</b><span>${TYPE_JP[c.type]}　${cardBrief(c, id)}</span><span class="dk-cost">消費${c.cost}／回復+${c.recover}</span></div>
+      <div class="dk-info"><b>${c.name}</b><span class="dk-own${has ? "" : " none"}">所持${own(id)}</span><span>${TYPE_JP[c.type]}　${cardBrief(c, id)}</span><span class="dk-cost">消費${c.cost}／回復+${c.recover}</span></div>
       ${canDes ? `<button class="dk-des${isDes ? " on" : ""}" data-act="dk-des" data-id="${id}" ${n ? "" : "disabled"} aria-pressed="${isDes}">★指定</button>` : ""}
       <div class="dk-count">
         <button class="dk-btn" data-act="dk-minus" data-id="${id}" ${n ? "" : "disabled"} aria-label="${c.name}を1枚減らす">−</button>
         <output class="${n ? "" : "zero"}">${n}</output>
-        <button class="dk-btn" data-act="dk-plus" data-id="${id}" ${n >= maxCopies(id) ? "disabled" : ""} aria-label="${c.name}を1枚増やす">＋</button>
+        <button class="dk-btn" data-act="dk-plus" data-id="${id}" ${n >= has ? "disabled" : ""} aria-label="${c.name}を1枚増やす">＋</button>
       </div>
     </div>`;
   };
@@ -1441,7 +1449,7 @@ function deckEdit(act, b) {
   if (act === "dk-plus" || act === "dk-minus") {
     const id = b.dataset.id;
     const n = (draft.cards[id] || 0) + (act === "dk-plus" ? 1 : -1);
-    if (n < 0 || n > maxCopies(id)) return;
+    if (n < 0 || n > Math.min(maxCopies(id), window.Meta ? Meta.owned(id) : 99)) return;
     if (n) draft.cards[id] = n; else {
       delete draft.cards[id];
       for (const attr of ["day", "night"]) if (draft.designated?.[attr]) draft.designated[attr] = draft.designated[attr].filter(x => x !== id);
@@ -1449,7 +1457,9 @@ function deckEdit(act, b) {
     draft.name = "マイデッキ";
   } else if (act === "dk-preset") {
     const p = PRESETS[b.dataset.p];
-    draft = { name: p.name, cards: { ...p.cards }, designated: {} };
+    const cards = {};   // 持っていない分は入れない
+    for (const [id, n] of Object.entries(p.cards)) { const k = Math.min(n, window.Meta ? Meta.owned(id) : n); if (k) cards[id] = k; }
+    draft = { name: p.name, cards, designated: {} };
   } else if (act === "dk-des") {   // 指定カードの選択・解除（各属性2種まで。3種目を選ぶと古い方が外れる）
     const id = b.dataset.id, attr = CARDS[id].attr;
     draft.designated ||= {};
@@ -1470,12 +1480,14 @@ function showHome(msg = "", ok = false) {
   const cont = playing && g && !g.over ? `<button class="tile main" data-act="continue"><b>続きから</b><span>${mode === "online" ? `オンライン・部屋 ${room?.code || ""}` : "AI対戦"}の試合に戻る</span></button>` : "";
   $("homeMain").innerHTML = `
     <header class="home-head"><h1>Eclipse Cards</h1><p>昼と夜がめぐる、シールドの駆け引きのカードバトル</p></header>
+    ${window.Meta?.homeHTML() || ""}
     <div class="home-deck">使うデッキ：<b>${myDeck.name}</b>（${deckSize(myDeck.cards)}枚・${HIOU_NAME[deckType(myDeck.cards)]}）</div>
     <div class="tiles">
       ${cont}
       <button class="tile main" data-act="ai"><b>AIと対戦</b><span>新しい試合を始める</span></button>
       <button class="tile" data-act="online"><b>オンライン対戦</b><span>部屋を作る・コードで入る</span></button>
       <button class="tile" data-act="deck"><b>デッキ編集</b><span>36枚のデッキを組む</span></button>
+      ${window.Meta?.tilesHTML() || ""}
       <button class="tile" data-act="tutorial"><b>チュートリアル</b><span>遊び方を順番に</span></button>
       <button class="tile" data-act="settings"><b>設定</b><span>演出・操作・AIの速さ</span></button>
     </div>
@@ -1498,6 +1510,7 @@ function showOnline(msg = "", ok = false) {
     </div>`;
   showDialog(`<h2>オンライン対戦</h2>
     <p>部屋を作ってコードを相手に伝えるか、相手のコードで入る。デッキは「${myDeck.name}」を使う。</p>
+    ${window.Meta?.roomBetHTML() || ""}
     ${online}
     <p class="msg${ok ? " ok" : ""}" id="menuMsg">${msg}</p>
     <button class="btn sub" data-act="home">ホームへ</button>`, "online");
@@ -1534,13 +1547,15 @@ function showTutorial(i = 0) {
 }
 
 /* ===== AI対戦 ===== */
-function startAI() {
+function startAI(bet = 0) {
   leaveRoom();
   gameId++;
   mode = "ai"; seat = 0; busy = false;
   const keys = Object.keys(PRESETS);
   const enemy = PRESETS[keys[Math.floor(Math.random() * keys.length)]];
-  g = new Game({ ai: [false, true], firstIdx: Math.random() < 0.5 ? 0 : 1, decks: [myDeck.cards, enemy.cards], designated: [myDeck.designated, null] });
+  g = new Game({ ai: [false, true], firstIdx: Math.random() < 0.5 ? 0 : 1, decks: [myDeck.cards, enemy.cards], designated: [myDeck.designated, null],
+                 cos: [window.Meta?.cos() || null, window.Meta?.aiCos() || null] });
+  window.Meta?.escrow(g.gid, bet);
   g.log(`試合開始。先攻は@${g.firstIdx}。@0のデッキ：${myDeck.name}／@1のデッキ：${enemy.name}`, "phase");
   hideDialog();
   playing = true; sel = null;
@@ -1581,7 +1596,12 @@ async function runAITurn(id) {
   await aiWait(500);
   runAITurn(id);
 }
-function finish() { busy = false; render(); setTimeout(showFinish, 900); }
+function finish() {
+  busy = false; render();
+  const res = g.winnerIdx === seat ? "win" : g.winnerIdx != null ? "lose" : "draw";
+  const pay = window.Meta?.settle(g.gid, res);   // 賭けたポイントの精算（同じ試合は1回だけ）
+  setTimeout(() => showFinish(pay), 900);
+}
 
 /* ===== 自分の操作（AI戦・オンライン共通） ===== */
 function afterMyAction() {
@@ -1682,6 +1702,7 @@ async function connectFirebase(config) {
   }
   onlineState = backend ? "on" : "off";
   await loadCloudDeck();
+  window.Meta?.onBackend();
   if ($("dialog").dataset.kind === "online") showOnline();
   else if (document.body.dataset.view === "home") showHome();
 })();
@@ -1713,19 +1734,20 @@ async function createRoom() {
       code = null;
     }
     if (!code) return menuMsg("部屋コードを作れなかった。もう一度押そう。");
+    const bet = window.Meta?.roomBet || 0;
     await ref.set({ v: 1, status: "waiting", hostId: uid, guestId: null, hostDeck: myDeck.cards, guestDeck: null,
-                    hostDes: myDeck.designated || null, guestDes: null,
+                    hostDes: myDeck.designated || null, guestDes: null, bet, hostCos: window.Meta?.cos() || null, guestCos: null,
                     seq: 0, writer: uid, updated: Date.now() });
     enterRoom(code, ref);
     showDialog(`<h2>部屋ができた</h2>
       <p>相手にこのコードを伝えて、「コードで入る」から入ってもらおう。</p>
       <div class="roomcode">${code}</div>
-      <p>相手が入ると自動で試合が始まる。</p>
+      <p>賭け：<b>${window.Meta?.roomBet || 0}pt</b>。相手が入ると自動で試合が始まる。</p>
       <button class="btn sub" data-act="menu">やめる</button>`, "waiting");
   } catch (e) { menuMsg(dbErr(e)); }
 }
 
-async function joinRoom(code) {
+async function joinRoom(code, agreed = false) {
   code = (code || "").trim().toUpperCase();
   if (!/^[A-Z0-9]{4}$/.test(code)) return menuMsg("4文字のコードを入力しよう。");
   menuMsg("部屋を探しています…", true);
@@ -1736,17 +1758,24 @@ async function joinRoom(code) {
     let d = s.data();
     if (d.hostId === uid || d.guestId === uid) { enterRoom(code, ref); hideDialog(); return; }   // 自分の部屋に戻る
     if (d.guestId) return menuMsg("その部屋はもう2人そろっている。");
+    if (d.bet && window.Meta) {   // 賭けのある部屋：払えるか確かめ、額を見せてから入る
+      const ng = Meta.canBet(d.bet);
+      if (ng) return menuMsg(ng);
+      if (!agreed) return Meta.confirmJoin(code, d.bet);
+    }
     const lease = await ref.acquire({ holder: uid, ttlMs: 5000 });
     if (!lease.acquired) return menuMsg("相手が同時に入ろうとしている。少し待ってもう一度。");
     s = await ref.get(); d = s.data();
     if (d.guestId && d.guestId !== uid) return menuMsg("その部屋はもう2人そろっている。");
     const hostDeck = sanitizeDeck(d.hostDeck);
+    const guestCos = window.Meta?.cos() || null;
     const ng = new Game({ ai: [false, false], firstIdx: Math.random() < 0.5 ? 0 : 1, decks: [hostDeck, myDeck.cards],
-                          designated: [d.hostDes, myDeck.designated] });
+                          designated: [d.hostDes, myDeck.designated], cos: [d.hostCos || null, guestCos] });
     ng.log(`試合開始。先攻は@${ng.firstIdx}`, "phase");
     ng.startTurn(ng.active);
     await ref.set({ v: 1, status: "playing", hostId: d.hostId, guestId: uid, hostDeck, guestDeck: myDeck.cards,
                     hostDes: d.hostDes ?? null, guestDes: myDeck.designated || null,
+                    bet: d.bet || 0, hostCos: d.hostCos || null, guestCos,
                     seq: (d.seq || 0) + 1, writer: uid, updated: Date.now(), state: ng.serialize() });
     enterRoom(code, ref);
     hideDialog();
@@ -1770,6 +1799,7 @@ function onRoomSnap(snap) {
   room.hostId = d.hostId; room.guestId = d.guestId;
   room.hostDeck = d.hostDeck ?? null; room.guestDeck = d.guestDeck ?? null;
   room.hostDes = d.hostDes ?? null; room.guestDes = d.guestDes ?? null;
+  room.bet = d.bet || 0; room.hostCos = d.hostCos || null; room.guestCos = d.guestCos || null;
   const mySeat = d.hostId === uid ? 0 : d.guestId === uid ? 1 : null;
   if (mySeat === null) { storeRoom(""); leaveRoom(); return showHome("この部屋の参加者ではない。"); }
   seat = mySeat;
@@ -1779,6 +1809,7 @@ function onRoomSnap(snap) {
   localSeq = sq;
   g = Game.load(d.state);
   busy = false;
+  if (!g.over) window.Meta?.escrow(g.gid, room.bet);   // 新しい試合なら賭けを預ける（同じ試合は1回だけ）
   const kind = $("dialog").dataset.kind;
   if (kind === "waiting" || kind === "finish" || kind === "online") hideDialog();
   playing = true;
@@ -1794,6 +1825,7 @@ function save() {
   const body = { v: 1, status: g.over ? "over" : "playing", hostId: room.hostId, guestId: room.guestId,
                  hostDeck: room.hostDeck ?? null, guestDeck: room.guestDeck ?? null,
                  hostDes: room.hostDes ?? null, guestDes: room.guestDes ?? null,
+                 bet: room.bet || 0, hostCos: room.hostCos ?? null, guestCos: room.guestCos ?? null,
                  seq: localSeq, writer: uid, updated: Date.now(), state: g.serialize() };
   const ref = room.ref;
   writeChain = writeChain.then(() => ref.set(body)).catch(e => {
@@ -1805,8 +1837,9 @@ function rematch() {
   if (!room) return;
   g = new Game({ ai: [false, false], firstIdx: Math.random() < 0.5 ? 0 : 1,
                  decks: [sanitizeDeck(room.hostDeck), sanitizeDeck(room.guestDeck)],
-                 designated: [room.hostDes, room.guestDes] });
+                 designated: [room.hostDes, room.guestDes], cos: [room.hostCos, room.guestCos] });
   g.log(`再戦開始。先攻は@${g.firstIdx}`, "phase");
+  window.Meta?.escrow(g.gid, room.bet);
   g.startTurn(g.active);
   hideDialog();
   render();
@@ -1833,6 +1866,7 @@ document.addEventListener("click", e => {
     return;
   }
   const act = b.dataset.act;
+  if (window.Meta?.onAct(act, b)) return;
   if (act === "use") choose(+b.dataset.uid, "use");
   else if (act === "rec") choose(+b.dataset.uid, "recover");
   else if (act === "cancel") { sel = null; render(); }
@@ -1844,7 +1878,7 @@ document.addEventListener("click", e => {
   else if (act === "deck") showDeckEditor();
   else if (act === "dk-plus" || act === "dk-minus" || act === "dk-preset" || act === "dk-des") deckEdit(act, b);
   else if (act === "dk-save") { saveDeck(draft); showHome(`「${myDeck.name}」を保存した。次の試合から使われる。`, true); }
-  else if (act === "ai") startAI();
+  else if (act === "ai") window.Meta ? Meta.askBet() : startAI();
   else if (act === "mkroom") createRoom();
   else if (act === "join") joinRoom($("codeIn")?.value);
   else if (act === "resume") joinRoom(loadSavedRoom());
