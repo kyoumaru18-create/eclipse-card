@@ -9,7 +9,7 @@ const R = {
   OUGI_AT: 4,        // 奥義（仏の怒りを含む）：この枚数目を使うと必殺技
   AMATERASU_DMG: 10, TSUKUYOMI_DMG: 10, KODOKU_POISON: 8, KODOKU_MULT: 3, KYOKA_MULT: 1.5,
   DECK_SIZE: 36, MAX_COPIES: 3, BUDDHA_MAX: 4,   // デッキはちょうど36枚。同じカードは3枚まで（奥義は4枚まで）
-  KYOKA_CUT: 0.15,   // 鏡花水月を溜めている間、k枚ごとに受ける攻撃をこの割合ずつ減らす（受けたダメージの半分を返す）
+  KYOKA_CUT: 0.10,   // 鏡花水月を溜めている間、k枚ごとに受ける攻撃（と毒・出血・蠱毒の気配）をこの割合ずつ減らす（受けた攻撃の半分を返す）
   PLAY_LIMIT: 2,     // 1ターンに使えるカードの枚数（使う・回復・奥義を数える。秘奥の同時使用は数えない）
 };
 const PHASE_ROUNDS = 3;   // 昼・夜それぞれの巡数
@@ -17,7 +17,7 @@ const CYCLE = [...Array(PHASE_ROUNDS).fill("day"), "dusk", ...Array(PHASE_ROUNDS
 const PHASE_JP = { day: "昼", dusk: "日没", night: "夜", dawn: "夜明け" };
 const ATTR_JP = { day: "昼", night: "夜", none: "無", both: "昼夜" };   // both：昼でも夜でも1.5倍
 const TYPE_JP = { attack: "攻撃", heal: "HP回復", poison: "毒", bleed: "出血", counter: "反撃", summon: "召喚", bloodshield: "血の盾", regen: "再生",
-  parry: "見切り", thorns: "棘", corrode: "腐食", bloom: "毒の開花", convert: "属性変化",
+  parry: "見切り", mirror: "照魔鏡", thorns: "棘", corrode: "腐食", bloom: "毒の開花", convert: "属性変化",
   draw: "ドロー", sutra: "サーチ", gassho: "シールド", guard: "守り", buddha: "奥義", ougi: "奥義" };
 const MONSTER_EXPECT = 3;   // モンスターが倒されるまでに攻撃する回数の目安（AIの見積もり用）
 const REVENGE_RATE = 0.5;   // 報復：前の相手ターンに受けたダメージのこの割合を上乗せ
@@ -31,7 +31,7 @@ const OUGI = {
   tsukuyomi: { name: "月読",     desc: "10ダメージ＋以降、相手のシールド回復量が半分・自分の夜カードは常に1.5倍", charge: k => `相手のシールド回復-${k}` },
   kodoku:    { name: "蠱毒",     desc: "相手に毒8＋以降、自分が与える毒と出血のダメージが3倍", charge: k => `毎ターン相手のHPに直接${k}` },
   kyoka:     { name: "鏡花水月", desc: "相手の攻撃カードを1回だけ1.5倍にして跳ね返せる（受けるときに選ぶ）",
-               charge: k => `受ける攻撃-${Math.round(R.KYOKA_CUT * k * 100)}%・受けた半分を返す` },
+               charge: k => `受ける攻撃と毒-${Math.round(R.KYOKA_CUT * k * 100)}%・受けた攻撃の半分を返す` },
   shura:     { name: "修羅",     desc: "HP10回復＋以降、HPを払うカードのダメージが1.25倍", charge: k => `HPを払うカードのダメージ+${k}` },
 };
 function charge(p, key) { return (p.stacks?.[key] || []).length; }
@@ -102,6 +102,7 @@ const CARDS = {
   bloodshield: { name: "血の盾", attr: "day",   type: "bloodshield", power: 8, hpcost: 4, cost: 0, recover: 5 },
   regen:       { name: "再生",   attr: "day",   type: "regen",       power: 3, turns: 4, cost: 2, recover: 4 },
   parry:    { name: "見切り",   attr: "day",   type: "parry",   cost: 2, recover: 3 },
+  mirror:   { name: "照魔鏡",   attr: "night", type: "mirror",  turns: 4, cost: 3, recover: 3 },
   revenge:  { name: "報復",     attr: "night", type: "attack",  power: 4, revenge: true, cost: 3, recover: 3 },
   thorns:   { name: "棘の鎧",   attr: "night", type: "thorns",  power: 3, turns: 3, cost: 3, recover: 4 },
   fang:     { name: "毒牙",     attr: "day",   type: "attack",  power: 4, poison: 2, cost: 3, recover: 3 },
@@ -130,7 +131,7 @@ const PRESETS = {
     needle: 3, bleed: 3, drain: 3, fang: 3, corrode: 3, bloom: 2, ambush: 2, bomb: 2,
     recoil: 2, eclipse: 2, counter: 2, firstaid: 3, heal: 2, kodoku: 4 } },
   counter: { name: "カウンター", cards: {
-    counter: 3, parry: 3, revenge: 3, thorns: 2, kyoka: 4, jab: 3, strike: 3, slash: 3,
+    counter: 3, parry: 3, revenge: 3, thorns: 2, kyoka: 4, mirror: 3, strike: 3, slash: 3,
     bomb: 2, ambush: 2, drain: 2, heal: 3, firstaid: 3 } },
   buddha: { name: "仏の怒り", cards: {
     buddha: 4, sutra: 2, gassho: 2, kongo: 2, counter: 3, jab: 3, heal: 3, firstaid: 3,
@@ -215,6 +216,7 @@ function newPlayer(name, isAI, def, chosen, cos = null) {
            thorns: 0, thornsTurns: 0,   // 棘の鎧（攻撃を受けるたびに相手へダメージ）
            taken: 0, revengeBase: 0,    // 受けた攻撃ダメージ（報復で使う。自分のターン開始で revengeBase へ）
            guard: 0,            // 金剛（次の自分のターンまで、受ける攻撃-この値）
+           mirrorTurns: 0,      // 照魔鏡の残りターン数（付けられる毒・出血を相手に返す）
          };
 }
 function hiouOptions(p) { return HIOU_SETS[p.hiou || "balanced"].filter(b => !p.buffs.has(b)); }
@@ -383,6 +385,20 @@ class Game {
   thornsHit(t, attacker) {
     if (t.thornsTurns && !this.over) this.dealDamage(attacker, t.thorns * this.escalation(), "棘の鎧");
   }
+  /* 毒・出血を付ける。相手が照魔鏡を構えていたら、付けようとした側に返る */
+  afflict(src, t, poison = 0, bleed = 0) {
+    if (t.mirrorTurns && (poison || bleed)) {
+      this.log(`${t.name}の照魔鏡が毒・出血を${src.name}に跳ね返した`, "counter", this.idx(t));
+      t = src;
+    }
+    t.poison += poison; t.bleed += bleed;
+    if (poison) this.log(`${t.name}に毒${poison}（合計${t.poison}）`);
+    if (bleed) this.log(`${t.name}は出血した（${t.bleed}ターン、カードを使うたびHP-${R.BLEED_DMG}）`);
+  }
+  /* 毒・出血・蠱毒の気配・毒の開花：HPに直接。鏡花水月を溜めていれば、攻撃と同じだけ減らす */
+  dotHit(p, amount, reason) {
+    this.directHp(p, Math.floor(amount * (1 - R.KYOKA_CUT * charge(p, "kyoka")) + 0.5), reason);
+  }
   directHp(p, n, reason) {
     p.hp -= n;
     this.log(`${reason}で${p.name}のHP-${n}`, "dmg", this.idx(p), n);
@@ -451,7 +467,7 @@ class Game {
       if (this.over) return;
       if (p.buffs.has("bloodthirst")) p.shield = Math.min(R.SHIELD_CAP, p.shield + c.hpcost);   // 秘奥・血の渇き
     }
-    if (p.bleed) { this.directHp(p, Math.floor(R.BLEED_DMG * this.dotMult(p) + 0.5), "出血"); if (this.over) return; }
+    if (p.bleed) { this.dotHit(p, R.BLEED_DMG * this.dotMult(p), "出血"); if (this.over) return; }
     if (c.type === "attack") {
       const raw = this.outgoing(p, this.attackPower(p, c), this.cardMult(c, p));
       const mon = this.target; this.target = null;
@@ -468,12 +484,9 @@ class Game {
       this.heal(p, c.power, c.name);
       if (c.cure && (p.poison || p.bleed)) { p.poison = 0; p.bleed = 0; this.log("毒と出血が治った"); }
     } else if (c.type === "poison") {
-      const n = c.power + (p.buffs.has("virulent") ? 2 : 0);   // 秘奥・猛毒
-      o.poison += n;
-      this.log(`${o.name}に毒${n}（合計${o.poison}）`);
+      this.afflict(p, o, c.power + (p.buffs.has("virulent") ? 2 : 0));   // 秘奥・猛毒で+2
     } else if (c.type === "bleed") {
-      o.bleed += c.power + (p.buffs.has("virulent") ? 2 : 0);
-      this.log(`${o.name}は出血した（${o.bleed}ターン、カードを使うたびHP-${R.BLEED_DMG}）`);
+      this.afflict(p, o, 0, c.power + (p.buffs.has("virulent") ? 2 : 0));
     } else if (c.type === "counter") {
       p.counter = true;
       this.log(`${p.name}は反撃の構えをとった`);
@@ -499,6 +512,9 @@ class Game {
     } else if (c.type === "guard") {
       p.guard = c.power;
       this.log(`${p.name}は金剛の構え（次の自分のターンまで、受ける攻撃-${c.power}）`);
+    } else if (c.type === "mirror") {
+      p.mirrorTurns = c.turns;
+      this.log(`${p.name}は照魔鏡を掲げた（${c.turns}ターン、付けられる毒・出血を跳ね返す）`);
     } else if (c.type === "parry") {
       p.parry = true;
       this.log(`${p.name}は見切りの構えをとった（次に受ける攻撃を0にする）`);
@@ -512,7 +528,7 @@ class Game {
     } else if (c.type === "bloom") {
       const n = Math.floor(o.poison * this.dotMult(o) + 0.5);
       o.poison = 0;
-      if (n) this.directHp(o, n, "毒の開花"); else this.log("毒がないので何も起きなかった");
+      if (n) this.dotHit(o, n, "毒の開花"); else this.log("毒がないので何も起きなかった");
     } else if (c.type === "convert") {
       const src = c.to === "day" ? "night" : "day";
       const changed = p.hand.filter(x => x.attr === src);
@@ -548,8 +564,7 @@ class Game {
     }
     if (a.recoil) this.directHp(p, a.recoil, "捨て身の反動");
     if (a.poison && !this.over && a.mon == null) {   // 毒牙
-      o.poison += a.poison + (p.buffs.has("virulent") ? 2 : 0);
-      this.log(`${o.name}に毒${a.poison}（合計${o.poison}）`);
+      this.afflict(p, o, a.poison + (p.buffs.has("virulent") ? 2 : 0));
     }
   }
   /* 鏡花水月の選択を受け取り、止めていた続き（同時使用の残りのカードと秘奥）を進める */
@@ -616,8 +631,8 @@ class Game {
       this.dealDamage(o, this.outgoing(p, R.TSUKUYOMI_DMG, 1), "月読", p);
     } else if (key === "kodoku") {
       p.kodoku = true;
-      o.poison += R.KODOKU_POISON;
       this.log(`${o.name}に毒${R.KODOKU_POISON}。以降、${p.name}が与える毒と出血は${R.KODOKU_MULT}倍`, "buff");
+      this.afflict(p, o, R.KODOKU_POISON);
     } else if (key === "shura") {
       p.shura = true;
       this.heal(p, BLOOD.SHURA_HEAL, "修羅");
@@ -672,13 +687,14 @@ class Game {
     p.counter = false;
     p.parry = false;
     p.guard = 0;
+    if (p.mirrorTurns) p.mirrorTurns--;
     p.revengeBase = p.taken || 0; p.taken = 0;
     if (p.thornsTurns) p.thornsTurns--;
     p.stackUsed = [];
     p.plays = 0;
     if (p.wrath) p.wrathTurns = (p.wrathTurns || 0) + 1;
     if (p.poison) {
-      this.directHp(p, Math.floor(p.poison * this.dotMult(p) + 0.5), "毒");
+      this.dotHit(p, p.poison * this.dotMult(p), "毒");
       p.poison--;
       if (this.over) return;
     }
@@ -690,12 +706,13 @@ class Game {
     const o = this.opp(p);
     const kk = charge(p, "kodoku");
     if (kk) {   // 蠱毒を溜めている間：相手のHPへ直接k
-      this.directHp(o, Math.floor(kk * this.escalation() + 0.5), "蠱毒の気配");
+      if (o.mirrorTurns) this.dotHit(p, kk * this.escalation(), "蠱毒の気配（照魔鏡で跳ね返った）");
+      else this.dotHit(o, kk * this.escalation(), "蠱毒の気配");
       if (this.over) return;
     }
     if (p.buffs.has("sunlight")) p.shield = Math.min(R.SHIELD_CAP, p.shield + 3);
     if (p.buffs.has("moonshadow")) o.shield = Math.max(0, o.shield - 1);
-    if (p.buffs.has("plague")) o.poison += 1;
+    if (p.buffs.has("plague")) this.afflict(p, o, 1);
     if (p.buffs.has("regenplus")) this.heal(p, 2, "再生強化");
     if (this.round === 1 && this.turnIdx === this.firstIdx) return this.draw(p, R.FIRST_DRAW);
     this.draw(p, (p.wrath ? R.WRATH_DRAW : R.DRAW) + (p.buffs.has("draw") ? 1 : 0));
@@ -750,6 +767,10 @@ const AI = {
     }
     if (c.type === "gassho") return p.shield <= 20 ? 3 : null;
     if (c.type === "guard") return p.guard ? null : 4 / c.cost;
+    if (c.type === "mirror") {   // 相手が毒や出血を使ってきているときだけ（蠱毒を溜めている・毒をもらっている）
+      const hint = o.kodoku || charge(o, "kodoku") || p.poison || p.bleed;
+      return p.mirrorTurns || !hint ? null : 5 / Math.max(1, c.cost);
+    }
     if (c.type === "parry") return p.parry || p.counter ? null : 6 / c.cost;
     if (c.type === "thorns") return p.thornsTurns ? null : 5 / c.cost;
     if (c.type === "corrode") { const n = Math.min(o.shield, o.poison); return n >= 4 ? n / c.cost : null; }
@@ -1014,6 +1035,7 @@ function statusChips(p) {
   if (ot) tag(bad, `回復-${ot}`, "相手の月読：シールド回復が減る");
   if (p.counter) tag(good, "反撃の構え", "次の攻撃を半分にして半分返す");
   if (p.parry) tag(good, "見切り", "次の攻撃を0にする");
+  if (p.mirrorTurns) tag(good, `照魔鏡 残${p.mirrorTurns}`, "付けられる毒・出血を相手に返す");
   if (p.guard) tag(good, `金剛-${p.guard}`, "次の自分のターンまで受ける攻撃が減る");
   if (p.thornsTurns) tag(good, `棘の鎧 残${p.thornsTurns}`, `攻撃を受けるたび相手に${p.thorns}`);
   if (p.regenTurns) tag(good, `再生 残${p.regenTurns}`, `ターン開始にHP+${p.regen}`);
@@ -1123,6 +1145,7 @@ function cardMain(p, c) {
   if (c.type === "gassho") return `<big>+${c.power}</big>シールド回復。<b>怒り状態でも使える</b>`;
   if (c.type === "guard") return `<big>-${c.power}</big>次の自分のターンまで、受ける攻撃が全部減る`;
   if (c.type === "parry") return `<big>0</big>次に受ける攻撃をダメージ0にする`;
+  if (c.type === "mirror") return `<big>${c.turns}</big>ターンの間、付けられる毒・出血（蠱毒の気配も）を相手に跳ね返す`;
   if (c.type === "thorns") return `<big>${c.power}</big>${c.turns}ターンの間、攻撃を受けるたび相手にダメージ`;
   if (c.type === "corrode") { const o = g.opp(p); return `<big>-${Math.min(o.shield, o.poison)}</big>相手の毒の量だけ相手のシールドを削る`; }
   if (c.type === "bloom") { const o = g.opp(p); return `<big>${Math.floor(o.poison * g.dotMult(o) + 0.5)}</big>相手の毒を今すぐ全部HPに入れる（毒は0になる）`; }
@@ -1369,6 +1392,7 @@ function cardBrief(c, id = c.id) {   // カード一覧（CARDS）の中身に�
     case "gassho": return `シールド+${c.power}。怒り状態でも使える`;
     case "guard": return `次の自分のターンまで、受ける攻撃が全部-${c.power}`;
     case "parry": return "次に受ける攻撃をダメージ0にする";
+    case "mirror": return `${c.turns}ターンの間、付けられる毒・出血（蠱毒の気配も）を相手に跳ね返す`;
     case "thorns": return `${c.turns}ターンの間、攻撃を受けるたび相手に${c.power}ダメージ`;
     case "corrode": return "相手の毒の量だけ相手のシールドを削る";
     case "bloom": return "相手の毒を今すぐ全部HPに入れて、毒を0にする";
