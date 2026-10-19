@@ -1752,7 +1752,8 @@ async function connectSupabase(config) {
   const who = u => u && { id: u.id, name: u.user_metadata?.full_name || u.user_metadata?.name || "", email: u.email || "" };
   authApi = {
     current: async () => who((await sb.auth.getSession()).data.session?.user),
-    onChange: cb => sb.auth.onAuthStateChange((_, session) => cb(who(session?.user))),
+    /* Supabase の決まり：この通知の中で直接データベースを呼ぶと止まることがあるので、一拍おいてから知らせる */
+    onChange: cb => sb.auth.onAuthStateChange((_, session) => { const u = who(session?.user); setTimeout(() => cb(u), 0); }),
     /* Googleの画面に移って、ログインしたらこのページに戻ってくる */
     /* 戻り先はいつも「同じフォルダの eclipse-cards.html」。.html を省いたアドレスで開いていても、
        Supabase の Redirect URLs に登録したアドレスと一致するように */
