@@ -39,6 +39,9 @@ const OUGI = {
 /* このターンに使えるカードの枚数（痺れていれば減る。最低1枚） */
 function playLimit(p) { return Math.max(1, R.PLAY_LIMIT - (p.numb || 0)); }
 function charge(p, key) { return (p.stacks?.[key] || []).length; }
+/* 昼は、毒のダメージが半分・状態異常のカードの消費が2倍（engine.py と同じ） */
+const DAY_STATUS_COST = 2, DAY_POISON_CUT = 0.5, NIGHT_POISON_MULT = 1;
+function isStatus(c) { return ["poison", "bleed", "linger", "bloom", "corrode"].includes(c.type) || !!(c.poison || c.blind || c.sleep || c.numbing); }
 function isOugi(c) { return c.type === "buddha" || c.type === "ougi"; }
 /* 秘奥：日没・夜明けに昼と夜の指定カードを同時に使うと1つ選べる。選べる候補はデッキのタイプで変わる */
 const BUFFS = {
@@ -317,6 +320,7 @@ class Game {
     return attr === this.phase || (p && p.blessing.includes(attr)) ? R.ATTR_BONUS : 1; }
   /* 毒・出血のダメージ倍率（日蝕の深まり×相手の蠱毒） */
   dotMult(victim) { return this.escalation() * (this.opp(victim).kodoku ? R.KODOKU_MULT : 1); }
+  poisonMult(victim) { return this.dotMult(victim) * (this.phase === "day" ? DAY_POISON_CUT : this.phase === "night" ? NIGHT_POISON_MULT : 1); }
   /* 日蝕の深まり。昼夜が1周するごとにダメージ倍率が上がる */
   escalation() { return 1 + R.ESCALATION * Math.floor((this.round - 1) / CYCLE.length); }
   outgoing(p, base, mult) { let d = base * mult * this.escalation(); if (p.buffs.has("attack")) d *= R.ATK_BUFF; return d; }
@@ -330,7 +334,10 @@ class Game {
     return Math.max(0, Math.floor(a + 0.5));
   }
   /* シールド消費（秘奥・灼光なら昼カードは-1） */
-  shieldCost(p, c) { return p.buffs.has("scorch") && c.attr === "day" ? Math.max(0, c.cost - 1) : c.cost; }
+  shieldCost(p, c) {
+    const cost = p.buffs.has("scorch") && c.attr === "day" ? Math.max(0, c.cost - 1) : c.cost;
+    return isStatus(c) && this.phase === "day" ? cost * DAY_STATUS_COST : cost;
+  }
   /* 攻撃カードの基本ダメージ（狂血は減っているHPで増え、修羅はHPを払うカードを強くする） */
   attackPower(p, c) {
     let power = c.power;
@@ -614,7 +621,7 @@ class Game {
       o.shield -= n;
       this.log(`腐食で${o.name}のシールド-${n}（毒${o.poison}）`, "dmg", this.idx(o), n);
     } else if (c.type === "bloom") {
-      const n = Math.floor(o.poison * this.dotMult(o) + 0.5);
+      const n = Math.floor(o.poison * this.poisonMult(o) + 0.5);
       o.poison = 0;
       if (n) this.dotHit(o, n, "毒の開花"); else this.log("毒がないので何も起きなかった");
     } else if (c.type === "convert") {
@@ -793,7 +800,7 @@ class Game {
     p.plays = 0;
     if (p.wrath) p.wrathTurns = (p.wrathTurns || 0) + 1;
     if (p.poison) {
-      this.dotHit(p, p.poison * this.dotMult(p), "毒");
+      this.dotHit(p, p.poison * this.poisonMult(p), "毒");
       p.poison--;
       if (this.over) return;
     }
@@ -863,7 +870,12 @@ const AI = {
     }
     return keep;
   },
+  /* 昼の状態異常カードは消費が倍なので、価値も半分（engine.py の score と同じ） */
   score(g, p, c) {
+    const s = this.baseScore(g, p, c);
+    return s != null && isStatus(c) && g.phase === "day" ? s / DAY_STATUS_COST : s;
+  },
+  baseScore(g, p, c) {
     const o = g.opp(p);
     if (c.type === "attack" && c.recoil && p.hp <= 15 + c.recoil) return null;
     if (c.hpcost && p.hp <= c.hpcost + 12) return null;   // HPを払うカードは、HPに余裕があるときだけ
@@ -896,7 +908,7 @@ const AI = {
     if (c.type === "thorns") return p.thornsTurns ? null : 5 / c.cost;
     if (c.type === "corrode") { const n = Math.min(o.shield, o.poison); return n >= 4 ? n / c.cost : null; }
     if (c.type === "bloom") {   // 毒は放っておくと減るので、とどめになるか、毒が多いときだけ一気に入れる
-      const n = o.poison * g.dotMult(o);
+      const n = o.poison * g.poisonMult(o);
       return n >= o.hp || n >= 8 ? n / c.cost : null;
     }
     if (c.type === "convert") {   // 今の時間帯に合う属性へ、合わない攻撃カードがあれば変える
@@ -1170,7 +1182,7 @@ function statusChips(p) {
   const good = [], bad = [];
   const tag = (list, name, desc, cls = "") => list.push(`<span class="st ${cls}"><b>${name}</b>${desc ? `<small>${desc}</small>` : ""}</span>`);
   if (p.wrath) tag(bad, "怒り状態", `受ける攻撃-${R.WRATH_REDUCE}・合掌と仏の怒りしか使えない・必殺技${finisherBase(p)}`, "wrath");
-  if (p.poison) tag(bad, `毒${p.poison}`, `ターン開始にHP-${Math.floor(p.poison * g.dotMult(p) + 0.5)}`, "poison");
+  if (p.poison) tag(bad, `毒${p.poison}`, `ターン開始にHP-${Math.floor(p.poison * g.poisonMult(p) + 0.5)}${g.phase === "day" ? "（昼は半分）" : ""}`, "poison");
   if (p.bleed) tag(bad, `出血 残${p.bleed}`, `カードを使うたびHP-${Math.floor(R.BLEED_DMG * g.dotMult(p) + 0.5)}`, "bleed");
   if (p.recoverHalf) tag(bad, "回復半減", "月読：シールド回復が半分");
   if (p.numbNext) tag(bad, "痺れ", "次のターン、使えるカードが1枚減る");
@@ -1309,7 +1321,7 @@ function cardMain(p, c) {
   if (c.type === "karma") return `<big>${c.turns}</big>ターンの間に受けた特殊ダメージ（毒・出血・蠱毒）を溜め、終わったら半分を回復し、${R.KARMA_MULT}倍にして相手のHPに直接返す`;
   if (c.type === "thorns") return `<big>${c.power}</big>${c.turns}ターンの間、攻撃を受けるたび相手にダメージ`;
   if (c.type === "corrode") { const o = g.opp(p); return `<big>-${Math.min(o.shield, o.poison)}</big>相手の毒の量だけ相手のシールドを削る`; }
-  if (c.type === "bloom") { const o = g.opp(p); return `<big>${Math.floor(o.poison * g.dotMult(o) + 0.5)}</big>相手の毒を今すぐ全部HPに入れる（毒は0になる）`; }
+  if (c.type === "bloom") { const o = g.opp(p); return `<big>${Math.floor(o.poison * g.poisonMult(o) + 0.5)}</big>相手の毒を今すぐ全部HPに入れる（毒は0になる）`; }
   if (c.type === "convert") {
     const src = c.to === "day" ? "night" : "day";
     return `<big>${p.hand.filter(x => x.attr === src).length}</big>枚の${ATTR_JP[src]}カードを${ATTR_JP[c.to]}属性に変えて1枚引く。<b>枚数に数えない</b>`;
