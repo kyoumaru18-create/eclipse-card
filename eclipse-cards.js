@@ -68,7 +68,11 @@ const HIOU_SETS = {
   counter: ["steadfast", "draw", "riposte"],
   blood: ["bloodthirst", "undying", "attack"],
 };
-const HIOU_NAME = { day: "陽の秘奥", night: "月の秘奥", balanced: "蝕の秘奥", venom: "毒の秘奥", counter: "鏡の秘奥", blood: "血の秘奥" };
+/* 昼特化（昼寄り）と夜特化（夜寄り）は秘奥のかわりに白夜・極夜：{ at: 使える時間帯, to: そのあとの時間帯をこれにする }
+   白夜：日没に昼と夜の指定カードを同時に使うと、そのあとの夜の3巡が両者にとって昼になる。起こした本人の昼カードは2.5倍。極夜はその逆 */
+const POLAR = { day: { at: "dusk", to: "day", name: "白夜" }, night: { at: "dawn", to: "night", name: "極夜" } };
+const POLAR_MULT = 2.5;
+const HIOU_NAME = { day: "白夜", night: "極夜", balanced: "蝕の秘奥", venom: "毒の秘奥", counter: "鏡の秘奥", blood: "血の秘奥" };
 const HIOU_LEAN = 4;   // 昼（夜）カードが夜（昼）カードよりこの枚数以上多ければ昼寄り（夜寄り）
 /* デッキのタイプ。蠱毒→毒、鏡花水月→カウンター、修羅→自傷、天照→昼、月読→夜。それ以外は昼と夜のカードの枚数で決まる */
 function deckType(def) {
@@ -86,7 +90,7 @@ const CARDS = {
   sunwolf:  { name: "陽の狼",     attr: "day",   type: "summon",  power: 3, hp: 8, cost: 5, recover: 5 },
   slash:    { name: "斬撃",       attr: "night", type: "attack",  power: 5, cost: 3, recover: 3 },
   ambush:   { name: "闇討ち",     attr: "night", type: "attack",  power: 8, cost: 5, recover: 5 },
-  nightowl: { name: "夜の梟",     attr: "night", type: "summon",  power: 3, hp: 8, cost: 5, recover: 5 },
+  nightowl: { name: "夜の梟",     attr: "night", type: "summon",  power: 4, hp: 8, cost: 5, recover: 5 },
   drain:    { name: "吸血",       attr: "night", type: "attack",  power: 6, drain: true, cost: 4, recover: 4 },
   jab:      { name: "突き",       attr: "day",   type: "attack",  power: 3, cost: 2, recover: 2 },
   recoil:   { name: "捨て身",     attr: "night", type: "attack",  power: 12, recoil: 3, cost: 4, recover: 4 },
@@ -114,10 +118,10 @@ const CARDS = {
   corrode:  { name: "腐食",     attr: "night", type: "corrode", cost: 2, recover: 3 },
   bloom:    { name: "毒の開花", attr: "day",   type: "bloom",   cost: 3, recover: 3 },
   mushibami:   { name: "蝕み",     attr: "night", type: "linger",  power: 1, turns: 3, cost: 3, recover: 3 },
-  zanshou:     { name: "残照",     attr: "day",   type: "attack",  power: 4, allday: true, cost: 3, recover: 3 },
+  zanshou:     { name: "残照",     attr: "day",   type: "attack",  power: 5, allday: true, cost: 3, recover: 3 },
   nichirin:    { name: "日輪の盾", attr: "day",   type: "sunshield", power: 4, cost: 0, recover: 2 },
-  oborozuki:   { name: "朧月",     attr: "night", type: "attack",  power: 5, allday: true, cost: 3, recover: 3 },
-  shingetsu:   { name: "新月",     attr: "night", type: "shieldbreak", power: 5, cost: 2, recover: 3 },
+  oborozuki:   { name: "朧月",     attr: "night", type: "attack",  power: 6, allday: true, cost: 3, recover: 3 },
+  shingetsu:   { name: "新月",     attr: "night", type: "shieldbreak", power: 7, cost: 2, recover: 3 },
   kamaenaoshi: { name: "構え直し", attr: "day",   type: "counter", draw: 1, cost: 3, recover: 3 },
   katsu:       { name: "喝",       attr: "night", type: "attack",  power: 5, zeal: true, cost: 3, recover: 3 },
   nembutsu:    { name: "念仏",     attr: "day",   type: "nembutsu", power: 5, cost: 0, recover: 2 },
@@ -241,6 +245,7 @@ class Game {
     this.gid = Math.random().toString(36).slice(2, 10);
     this.players = [newPlayer("@0", ai[0], decks[0], designated[0], cos[0]), newPlayer("@1", ai[1], decks[1], designated[1], cos[1])];
     this.firstIdx = firstIdx; this.turnIdx = firstIdx;
+    this.override = {}; this.polarOwner = {};   // 白夜・極夜で時間帯が変わった巡 {巡: "day"/"night"} と、起こした人 {巡: 席}
     this.round = 1; this.over = false; this.winnerIdx = null; this.pending = null; this.logs = []; this.logSeq = 0;
     for (const p of this.players) this.draw(p, R.START_HAND);
   }
@@ -256,7 +261,7 @@ class Game {
   serialize() {
     return {
       gid: this.gid, players: this.players.map(p => ({ ...p, buffs: [...p.buffs] })),
-      firstIdx: this.firstIdx, turnIdx: this.turnIdx, round: this.round, over: this.over,
+      firstIdx: this.firstIdx, turnIdx: this.turnIdx, round: this.round, override: this.override, polarOwner: this.polarOwner, over: this.over,
       winnerIdx: this.winnerIdx, pending: this.pending, logs: this.logs.slice(-80), logSeq: this.logSeq,
     };
   }
@@ -272,11 +277,15 @@ class Game {
     const d = this.players.map((p, i) => [before[i][0], p.hp, before[i][1], p.shield]);
     if (d.some(([h0, h1, s0, s1]) => h0 !== h1 || s0 !== s1)) this.log(label, "sum", null, d);
   }
-  get phase() { return CYCLE[(this.round - 1) % CYCLE.length]; }
+  get phase() { return this.override?.[this.round] || CYCLE[(this.round - 1) % CYCLE.length]; }
   get active() { return this.players[this.turnIdx]; }
   opp(p) { return p === this.players[0] ? this.players[1] : this.players[0]; }
   isTransition() { return this.phase === "dusk" || this.phase === "dawn"; }
-  buffReady(p) { return this.isTransition() && p.buffRound !== this.round && hiouOptions(p).length > 0; }
+  buffReady(p) {
+    const po = POLAR[p.hiou];   // 白夜は日没だけ、極夜は夜明けだけ
+    if (po) return this.phase === po.at && p.buffRound !== this.round;
+    return this.isTransition() && p.buffRound !== this.round && hiouOptions(p).length > 0;
+  }
   roundsToTransition() {
     for (let k = 0; k < CYCLE.length; k++) {
       const ph = CYCLE[(this.round - 1 + k) % CYCLE.length];
@@ -298,6 +307,7 @@ class Game {
     return this.attrMult(c.attr, p);
   }
   attrMult(attr, p = null) {
+    if (p && this.polarOwner?.[this.round] === this.idx(p) && attr === this.phase) return POLAR_MULT;   // 白夜・極夜を起こした本人
     if (attr === "both")   // 薄明の刃：昼でも夜でも1.5倍（日没・夜明けは等倍）
       return this.phase === "day" || this.phase === "night" || (p && p.blessing.length) ? R.ATTR_BONUS : 1;
     return attr === this.phase || (p && p.blessing.includes(attr)) ? R.ATTR_BONUS : 1; }
@@ -639,7 +649,14 @@ class Game {
       }
       if (this.over) return;
     }
-    if (pairBuff) this.grantPairBuff(p);
+    if (pairBuff) POLAR[p.hiou] ? this.triggerPolar(p) : this.grantPairBuff(p);
+  }
+  /* 白夜・極夜：そのあとの時間帯（3巡）を、両者にとって昼（夜）にする */
+  triggerPolar(p) {
+    const po = POLAR[p.hiou];
+    for (let r = this.round + 1; r <= this.round + PHASE_ROUNDS; r++) { this.override[r] = po.to; this.polarOwner[r] = this.idx(p); }
+    p.buffRound = this.round;
+    this.log(`${po.name}：${p.name}が起こした。このあと${PHASE_ROUNDS}巡は${PHASE_JP[po.to]}（${p.name}の${PHASE_JP[po.to]}カードは${POLAR_MULT}倍）`, "polar", this.idx(p), po.name);
   }
   grantPairBuff(p) {
     const opts = hiouOptions(p);
@@ -796,7 +813,8 @@ class Game {
     if (this.turnIdx === this.firstIdx) {
       const prev = this.phase;
       this.round++;
-      if (this.phase !== prev) this.log({
+      if (this.override[this.round] && this.phase !== prev) this.log(this.phase === "day" ? "白夜：夜が来ない" : "極夜：昼が来ない", "phase");
+      else if (this.phase !== prev) this.log({
         dusk: "日没が訪れた", night: "夜になった", dawn: "夜明けが来た", day: "昼になった",
       }[this.phase], "phase");
       if (this.round > R.MAX_ROUNDS) { this.over = true; this.winnerIdx = null; }
@@ -976,6 +994,7 @@ function runFx() {
     else if (l.k === "karma") banner("因果応報", `${nameOf(l.t)}が受けた特殊ダメージを返した（${l.a}）`, "counter");
     else if (l.k === "wrath") banner("怒り状態", `${nameOf(l.t)}は攻撃を受けるたびダメージ-${R.WRATH_REDUCE}`, "finisher");
     else if (l.k === "buffget") banner("秘奥獲得", fmt(l.m).split("：")[1] || "", "buff");
+    else if (l.k === "polar") banner(l.a, fmt(l.m).split("：")[1] || "", l.a === "白夜" ? "day" : "night");
   }
   fxSeen = g.logSeq;
 }
@@ -1314,7 +1333,8 @@ function guideHTML(me) {
   const lim = playLimit(me), left = Math.max(0, lim - (me.plays || 0));
   const pips = `<span class="plays" title="このターンに使える残りの枚数（使う・回復・奥義）"><span class="pip-row">${"●".repeat(left)}${"○".repeat(lim - left)}</span><small>${left ? `あと${left}枚` : "使い切った"}${me.numb ? "（痺れ）" : ""}</small></span>`;
   const pairs = g.pairOptions(me);
-  const pairHTML = pairs.length ? `<div class="pairs"><span class="act-hint"><b>${PHASE_JP[g.phase]}</b>：昼と夜の指定カードを同時に使うと${HIOU_NAME[me.hiou || "balanced"]}（枚数に数えない）</span>
+  const po = POLAR[me.hiou];
+  const pairHTML = pairs.length ? `<div class="pairs"><span class="act-hint"><b>${PHASE_JP[g.phase]}</b>：昼と夜の指定カードを同時に使うと${po ? `<b>${po.name}</b>（このあと${PHASE_ROUNDS}巡が${PHASE_JP[po.to]}になり、あなたの${PHASE_JP[po.to]}カードは${POLAR_MULT}倍）` : HIOU_NAME[me.hiou || "balanced"]}（枚数に数えない）</span>
     ${pairs.map(([d, n]) => `<button class="btn small" data-act="pair" data-d="${d.uid}" data-n="${n.uid}">${d.name}＋${n.name}（シールド-${g.shieldCost(me, d) + g.shieldCost(me, n)}）</button>`).join("")}</div>` : "";
   const note = me.wrath ? `<span class="act-hint">怒り状態：仏の怒りと合掌だけ使える</span>` : me.bleed ? `<span class="act-hint">出血中：使うたびHP-${R.BLEED_DMG}</span>` : "";
   return `${pairHTML}${row(`${pips}${note}<span class="grow"></span><button class="btn primary" data-act="end">ターン終了</button>`)}`;
@@ -1328,12 +1348,15 @@ function render() {
   $("modeFlag").textContent = mode === "online" ? `オンライン・部屋 ${room?.code || ""}` : "AI対戦";
 
   const idx = (g.round - 1) % CYCLE.length;
-  CYCLE.forEach((_, i) => {
+  CYCLE.forEach((ph, i) => {
     const cell = $(`cell-${i}`);
+    const ov = g.override?.[g.round - idx + i];   // 白夜・極夜で変わった巡
+    cell.className = `cell ${ov || ph}${ov ? " polar" : ""}`;
+    cell.textContent = ov ? (ov === "day" ? "白" : "極") : { day: "昼", dusk: "没", night: "夜", dawn: "明" }[ph];
     cell.classList.toggle("cur", i === idx);
     cell.classList.toggle("past", i < idx);
   });
-  $("phaseName").textContent = `第${g.round}巡　${PHASE_JP[g.phase]}`;
+  $("phaseName").textContent = `第${g.round}巡　${g.override?.[g.round] ? (g.phase === "day" ? "白夜" : "極夜") : PHASE_JP[g.phase]}`;
   const [k, nxt] = g.roundsToTransition();
   const esc = g.escalation();
   $("phaseInfo").textContent = (k === 0 ? "秘奥のチャンス・日蝕が2倍" : `次の${PHASE_JP[nxt]}まであと${k}巡${g.phase === "day" || g.phase === "night" ? `　${PHASE_JP[g.phase]}のカードが1.5倍` : ""}`)
@@ -1557,7 +1580,8 @@ function renderDeckEditor() {
     <div class="dk-summary">
       <b class="${probs.length ? "ng" : ""}">${size}枚</b>
       <span>昼${byAttr("day")}・夜${byAttr("night")}・無${byAttr("none")}・奥義${ougiCount}</span>
-      <span>秘奥：<b class="dk-type">${HIOU_NAME[deckType(def)]}</b>（${HIOU_SETS[deckType(def)].map(b => BUFFS[b][0]).join("・")}）</span>
+      <span>${POLAR[deckType(def)] ? `秘奥のかわりに：<b class="dk-type">${POLAR[deckType(def)].name}</b>（${PHASE_JP[POLAR[deckType(def)].at]}に指定カードを同時に使うと、このあと${PHASE_ROUNDS}巡が${PHASE_JP[POLAR[deckType(def)].to]}になる）`
+        : `秘奥：<b class="dk-type">${HIOU_NAME[deckType(def)]}</b>（${HIOU_SETS[deckType(def)].map(b => BUFFS[b][0]).join("・")}）`}</span>
       <span>指定カード　昼：${desName("day")}　夜：${desName("night")}</span>
     </div>
     <p class="dk-rule">★指定で、日没・夜明けの秘奥に使うカードを昼2種・夜2種まで選べる（発動には昼1枚＋夜1枚）。選ばなかった分は枚数の多いカードが自動で入る。</p>
