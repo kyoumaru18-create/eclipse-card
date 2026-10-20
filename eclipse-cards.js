@@ -9,8 +9,8 @@ const R = {
   OUGI_AT: 4,        // 奥義（仏の怒りを含む）：この枚数目を使うと必殺技
   AMATERASU_DMG: 10, TSUKUYOMI_DMG: 10, KODOKU_POISON: 8, KODOKU_MULT: 3, KYOKA_MULT: 1.5,
   DECK_SIZE: 36, MAX_COPIES: 3, BUDDHA_MAX: 4,   // デッキはちょうど36枚。同じカードは3枚まで（奥義は4枚まで）
-  KYOKA_CUT: 0.15,   // 鏡花水月を溜めている間、k枚ごとに受ける攻撃をこの割合ずつ減らす（受けた攻撃の半分を返す）
-  KARMA_MULT: 1,     // 因果応報：溜めた特殊ダメージをこの倍率で、相手のHPに直接返す
+  KYOKA_CUT: 0.12,   // 鏡花水月を溜めている間、k枚ごとに受ける攻撃をこの割合ずつ減らす（受けた攻撃の半分を返す）
+  KARMA_MULT: 1.5,   // 因果応報：溜めた特殊ダメージをこの倍率で、相手のHPに直接返す
   KARMA_HEAL: 0.5,   // 因果応報：溜めた特殊ダメージのこの割合だけ、自分のHPを回復する
   PLAY_LIMIT: 2,     // 1ターンに使えるカードの枚数（使う・回復・奥義を数える。秘奥の同時使用は数えない）
 };
@@ -399,7 +399,7 @@ class Game {
     this.directHp(p, n, reason);
     if (p.karmaTurns) p.karmaStore = (p.karmaStore || 0) + n;
   }
-  /* 因果応報：自分のターンの始めに1ターン進める。終わったら溜めた分の半分を回復し、溜めた分を相手のHPに直接返す */
+  /* 因果応報：自分のターンの始めに1ターン進める。終わったら溜めた分の半分を回復し、1.5倍を相手のHPに直接返す */
   karmaTick(p) {
     if (!p.karmaTurns || --p.karmaTurns) return;
     const store = p.karmaStore || 0;
@@ -525,7 +525,7 @@ class Game {
       this.log(`${p.name}は金剛の構え（次の自分のターンまで、受ける攻撃-${c.power}）`);
     } else if (c.type === "karma") {
       p.karmaTurns = c.turns; p.karmaStore = 0;
-      this.log(`${p.name}は因果応報の構え（${c.turns}ターンの間に受けた特殊ダメージの半分を回復し、同じだけ返す）`);
+      this.log(`${p.name}は因果応報の構え（${c.turns}ターンの間に受けた特殊ダメージの半分を回復し、${R.KARMA_MULT}倍にして返す）`);
     } else if (c.type === "parry") {
       p.parry = true;
       this.log(`${p.name}は見切りの構えをとった（次に受ける攻撃を0にする）`);
@@ -1157,7 +1157,7 @@ function cardMain(p, c) {
   if (c.type === "gassho") return `<big>+${c.power}</big>シールド回復。<b>怒り状態でも使える</b>`;
   if (c.type === "guard") return `<big>-${c.power}</big>次の自分のターンまで、受ける攻撃が全部減る`;
   if (c.type === "parry") return `<big>0</big>次に受ける攻撃をダメージ0にする`;
-  if (c.type === "karma") return `<big>${c.turns}</big>ターンの間に受けた特殊ダメージ（毒・出血・蠱毒）を溜め、終わったら半分を回復し、同じだけ相手のHPに直接返す`;
+  if (c.type === "karma") return `<big>${c.turns}</big>ターンの間に受けた特殊ダメージ（毒・出血・蠱毒）を溜め、終わったら半分を回復し、${R.KARMA_MULT}倍にして相手のHPに直接返す`;
   if (c.type === "thorns") return `<big>${c.power}</big>${c.turns}ターンの間、攻撃を受けるたび相手にダメージ`;
   if (c.type === "corrode") { const o = g.opp(p); return `<big>-${Math.min(o.shield, o.poison)}</big>相手の毒の量だけ相手のシールドを削る`; }
   if (c.type === "bloom") { const o = g.opp(p); return `<big>${Math.floor(o.poison * g.dotMult(o) + 0.5)}</big>相手の毒を今すぐ全部HPに入れる（毒は0になる）`; }
@@ -1404,7 +1404,7 @@ function cardBrief(c, id = c.id) {   // カード一覧（CARDS）の中身に�
     case "gassho": return `シールド+${c.power}。怒り状態でも使える`;
     case "guard": return `次の自分のターンまで、受ける攻撃が全部-${c.power}`;
     case "parry": return "次に受ける攻撃をダメージ0にする";
-    case "karma": return `${c.turns}ターンの間に受けた特殊ダメージを溜め、終わったら半分を回復し、同じだけ相手のHPに直接返す`;
+    case "karma": return `${c.turns}ターンの間に受けた特殊ダメージを溜め、終わったら半分を回復し、${R.KARMA_MULT}倍にして相手のHPに直接返す`;
     case "thorns": return `${c.turns}ターンの間、攻撃を受けるたび相手に${c.power}ダメージ`;
     case "corrode": return "相手の毒の量だけ相手のシールドを削る";
     case "bloom": return "相手の毒を今すぐ全部HPに入れて、毒を0にする";
