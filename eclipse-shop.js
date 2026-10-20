@@ -13,7 +13,7 @@
 
   /* カードの希少度：基本のカードはコモン、デッキの型ごとのカードはレア、奥義はスーパーレア */
   const BASIC = ["strike", "bomb", "slash", "ambush", "jab", "drain", "heal", "firstaid", "counter", "eclipse", "needle", "bleed", "recoil", "sunwolf", "nightowl",
-    "mushibami", "zanshou", "nichirin", "oborozuki", "shingetsu", "kamaenaoshi", "katsu", "nembutsu", "rengeki"];   // デッキごとの個性のある基本カードもコモン
+    "mushibami", "zanshou", "nichirin", "oborozuki", "shingetsu", "kamaenaoshi", "katsu", "nembutsu", "rengeki", "zazen", "fudoushin"];   // デッキごとの個性のある基本カードもコモン
   const rarity = id => isOugi(CARDS[id]) ? "SR" : BASIC.includes(id) ? "C" : "R";
   const RARITY_JP = { C: "コモン", R: "レア", SR: "スーパーレア" };
   /* 絵柄違い [名前, 出やすさ] */
