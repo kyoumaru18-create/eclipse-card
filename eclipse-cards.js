@@ -36,6 +36,8 @@ const OUGI = {
                charge: k => `受ける攻撃-${Math.round(R.KYOKA_CUT * k * 100)}%・受けた半分を返す` },
   shura:     { name: "修羅",     desc: "HP10回復＋以降、HPを払うカードのダメージが1.25倍", charge: k => `HPを払うカードのダメージ+${k}` },
 };
+/* このターンに使えるカードの枚数（痺れていれば減る。最低1枚） */
+function playLimit(p) { return Math.max(1, R.PLAY_LIMIT - (p.numb || 0)); }
 function charge(p, key) { return (p.stacks?.[key] || []).length; }
 function isOugi(c) { return c.type === "buddha" || c.type === "ougi"; }
 /* 秘奥：日没・夜明けに昼と夜の指定カードを同時に使うと1つ選べる。選べる候補はデッキのタイプで変わる */
@@ -89,8 +91,8 @@ const CARDS = {
   jab:      { name: "突き",       attr: "day",   type: "attack",  power: 3, cost: 2, recover: 2 },
   recoil:   { name: "捨て身",     attr: "night", type: "attack",  power: 12, recoil: 3, cost: 4, recover: 4 },
   eclipse:  { name: "日蝕",       attr: "none",  type: "attack",  power: 6, eclipse: true, cost: 4, recover: 4 },
-  needle:   { name: "毒針",       attr: "night", type: "poison",  power: 5, cost: 3, recover: 3 },
-  bleed:    { name: "裂傷",       attr: "night", type: "bleed",   power: 3, cost: 3, recover: 3 },
+  needle:   { name: "毒針",       attr: "night", type: "poison",  power: 5, sleep: 1, cost: 3, recover: 3 },
+  bleed:    { name: "裂傷",       attr: "night", type: "bleed",   power: 3, numbing: 1, cost: 3, recover: 3 },
   counter:  { name: "反撃の構え", attr: "day",   type: "counter", cost: 3, recover: 3 },
   heal:     { name: "治癒",       attr: "day",   type: "heal",    power: 8, cost: 0, recover: 2 },
   firstaid: { name: "応急処置",   attr: "none",  type: "heal",    power: 4, cure: true, cost: 0, recover: 2 },
@@ -107,7 +109,7 @@ const CARDS = {
   karma:    { name: "因果応報", attr: "night", type: "karma",   turns: 3, cost: 3, recover: 3 },
   revenge:  { name: "報復",     attr: "night", type: "attack",  power: 4, revenge: true, cost: 3, recover: 3 },
   thorns:   { name: "棘の鎧",   attr: "night", type: "thorns",  power: 3, turns: 3, cost: 3, recover: 4 },
-  fang:     { name: "毒牙",     attr: "day",   type: "attack",  power: 4, poison: 2, cost: 3, recover: 3 },
+  fang:     { name: "毒牙",     attr: "day",   type: "attack",  power: 4, poison: 2, numbing: 1, cost: 3, recover: 3 },
   corrode:  { name: "腐食",     attr: "night", type: "corrode", cost: 2, recover: 3 },
   bloom:    { name: "毒の開花", attr: "day",   type: "bloom",   cost: 3, recover: 3 },
   sunturn:  { name: "陽転",     attr: "day",   type: "convert", to: "day",   free: true, draw: 1, cost: 1, recover: 2 },
@@ -219,6 +221,7 @@ function newPlayer(name, isAI, def, chosen, cos = null) {
            taken: 0, revengeBase: 0,    // 受けた攻撃ダメージ（報復で使う。自分のターン開始で revengeBase へ）
            guard: 0,            // 金剛（次の自分のターンまで、受ける攻撃-この値）
            karmaTurns: 0, karmaStore: 0,   // 因果応報の残りターン数と、その間に溜めた特殊ダメージ
+           numbNext: 0, numb: 0, drowsyNext: 0,   // 痺れ（次の自分のターン、使えるカード-1）・眠り（引く枚数-1）
          };
 }
 function hiouOptions(p) { return HIOU_SETS[p.hiou || "balanced"].filter(b => !p.buffs.has(b)); }
@@ -437,7 +440,7 @@ class Game {
   }
   /* counted=false は秘奥の同時使用（1ターンの枚数制限に数えない） */
   canPlay(p, c, mode, counted = true) {
-    if (counted && (p.plays || 0) >= R.PLAY_LIMIT && !(mode === "use" && c.free)) return false;
+    if (counted && (p.plays || 0) >= playLimit(p) && !(mode === "use" && c.free)) return false;
     // 奥義は溜めるだけ。同じ奥義は1ターン1枚。怒り状態でも仏の怒りだけは使える
     if (isOugi(c)) return mode === "use" && !p.stackUsed.includes(c.id) && (!p.wrath || c.id === "buddha");
     if (p.wrath) return mode === "use" && !!c.wrathok;   // 怒り状態では、合掌（を使う）だけ
@@ -467,6 +470,17 @@ class Game {
       return;
     }
     if (isOugi(c)) return this.useOugi(p, c);
+    const r = this.resolveUse(p, c);
+    if (!this.over) this.slowDown(p, c);
+    return r;
+  }
+  /* おまけの効果：相手の次のターンを鈍らせる（眠り＝引く枚数-1、痺れ＝使えるカード-1） */
+  slowDown(p, c) {
+    const o = this.opp(p);
+    if (c.sleep && !o.drowsyNext) { o.drowsyNext = 1; this.log(`${o.name}は眠くなった（次のターン、引く枚数が1枚減る）`); }
+    if (c.numbing && !o.numbNext) { o.numbNext = 1; this.log(`${o.name}は痺れた（次のターン、使えるカードが1枚減る）`); }
+  }
+  resolveUse(p, c) {
     if (c.type !== "summon") p.drop.push(c);   // モンスターのカードは場に残り、破壊されたらドロップゾーンへ
     const o = this.opp(p);
     const cost = this.shieldCost(p, c);
@@ -695,6 +709,8 @@ class Game {
   }
   beginTurn(p) {
     this.log(`第${this.round}巡【${PHASE_JP[this.phase]}】${p.name}のターン`, "turn");
+    p.numb = p.numbNext || 0; p.numbNext = 0;   // 痺れ・眠りは、受けた次の自分のターンだけ
+    const drowsy = p.drowsyNext || 0; p.drowsyNext = 0;
     p.counter = false;
     p.parry = false;
     p.guard = 0;
@@ -726,7 +742,8 @@ class Game {
     if (p.buffs.has("plague")) this.afflict(p, o, 1);
     if (p.buffs.has("regenplus")) this.heal(p, 2, "再生強化");
     if (this.round === 1 && this.turnIdx === this.firstIdx) return this.draw(p, R.FIRST_DRAW);
-    this.draw(p, (p.wrath ? R.WRATH_DRAW : R.DRAW) + (p.buffs.has("draw") ? 1 : 0));
+    if (drowsy) this.log(`${p.name}は眠り（引く枚数-${drowsy}）`);
+    this.draw(p, (p.wrath ? R.WRATH_DRAW : R.DRAW) + (p.buffs.has("draw") ? 1 : 0) - drowsy);
   }
   endTurn(p) {
     const o = this.opp(p);
@@ -812,7 +829,7 @@ const AI = {
     }
     for (const c of hand)   // 陽転・月転（枚数に数えない）は、合う時間帯なら先に使う
       if (c.type === "convert" && g.canPlay(p, c, "use") && this.score(g, p, c) != null) return [c.uid, "use"];
-    if ((p.plays || 0) >= R.PLAY_LIMIT) return null;   // 1ターンの枚数を使い切った（秘奥の同時使用だけは上で済ませてある）
+    if ((p.plays || 0) >= playLimit(p)) return null;   // 1ターンの枚数を使い切った（秘奥の同時使用だけは上で済ませてある）
     for (const c of hand)
       if (c.type === "attack" && g.preview(p, c) >= o.hp + o.shield && p.hp + p.shield > c.cost) return [c.uid, "use"];
     if (p.hp <= R.MAX_HP - 8 || ((p.poison >= 2 || p.bleed) && p.hp <= R.MAX_HP - 4))
@@ -1043,6 +1060,9 @@ function statusChips(p) {
   if (p.poison) tag(bad, `毒${p.poison}`, `ターン開始にHP-${Math.floor(p.poison * g.dotMult(p) + 0.5)}`, "poison");
   if (p.bleed) tag(bad, `出血 残${p.bleed}`, `カードを使うたびHP-${Math.floor(R.BLEED_DMG * g.dotMult(p) + 0.5)}`, "bleed");
   if (p.recoverHalf) tag(bad, "回復半減", "月読：シールド回復が半分");
+  if (p.numbNext) tag(bad, "痺れ", "次のターン、使えるカードが1枚減る");
+  if (p.numb && p === g.active) tag(bad, "痺れ中", "このターン使えるカードが1枚減っている");
+  if (p.drowsyNext) tag(bad, "眠り", "次のターン、引く枚数が1枚減る");
   const ot = charge(g.opp(p), "tsukuyomi");
   if (ot) tag(bad, `回復-${ot}`, "相手の月読：シールド回復が減る");
   if (p.counter) tag(good, "反撃の構え", "次の攻撃を半分にして半分返す");
@@ -1141,14 +1161,15 @@ function cardMain(p, c) {
     if (c.eclipse && m === 1) extra += "日没・夜明けは2倍";
     if (c.revenge) extra += `前の相手ターンに受けたダメージ（${p.revengeBase || 0}）の半分を上乗せ`;
     if (c.poison) extra += `＋毒${c.poison}`;
+    if (c.numbing) extra += "＋相手を痺れさせる";
     if (c.attr === "both" && m === 1) extra += "昼でも夜でも1.5倍";
     if (c.splash) extra += "与えた分シールド回復";
     if (c.frenzy) extra += p.hp <= R.MAX_HP / 2 ? "（HP半分以下で2倍）" : "HPが半分以下なら2倍";
     return `<big class="${v > c.power ? "boost" : ""}">${v}</big>ダメージ ${extra}`;
   }
   if (c.type === "heal") return `<big>+${c.power}</big>HPを回復${c.cure ? "・毒と出血も治す" : ""}`;
-  if (c.type === "poison") return `<big>${c.power}</big>毒を与える（毎ターンHPに直接）`;
-  if (c.type === "bleed") return `<big>${c.power}</big>ターン出血。相手はカードを使うたびHP-${R.BLEED_DMG}`;
+  if (c.type === "poison") return `<big>${c.power}</big>毒を与える（毎ターンHPに直接）${c.sleep ? "＋相手の次のターン、引く枚数-1" : ""}`;
+  if (c.type === "bleed") return `<big>${c.power}</big>ターン出血。相手はカードを使うたびHP-${R.BLEED_DMG}${c.numbing ? "＋相手の次のターン、使えるカード-1" : ""}`;
   if (c.type === "counter") return `<big>½</big>次に受ける攻撃を半分にし、半分を返す`;
   if (c.type === "bloodshield") return `<big>+${c.power}</big>HPを${c.hpcost}払ってシールドを増やす`;
   if (c.type === "regen") return `<big>+${c.power}×${c.turns}</big>毎ターン始めにHP回復`;
@@ -1232,8 +1253,8 @@ function guideHTML(me) {
   if (g.turnIdx !== seat)
     return row(`<span class="turn-chip foe">${nameOf(1 - seat)}のターン</span><span class="act-hint">${mode === "ai" ? "行動中…" : "相手の操作を待っている"}</span>`);
   if (selectedCard()) return selGuideHTML(me);
-  const left = Math.max(0, R.PLAY_LIMIT - (me.plays || 0));
-  const pips = `<span class="plays" title="このターンに使える残りの枚数（使う・回復・奥義）"><span class="pip-row">${"●".repeat(left)}${"○".repeat(R.PLAY_LIMIT - left)}</span><small>${left ? `あと${left}枚` : "使い切った"}</small></span>`;
+  const lim = playLimit(me), left = Math.max(0, lim - (me.plays || 0));
+  const pips = `<span class="plays" title="このターンに使える残りの枚数（使う・回復・奥義）"><span class="pip-row">${"●".repeat(left)}${"○".repeat(lim - left)}</span><small>${left ? `あと${left}枚` : "使い切った"}${me.numb ? "（痺れ）" : ""}</small></span>`;
   const pairs = g.pairOptions(me);
   const pairHTML = pairs.length ? `<div class="pairs"><span class="act-hint"><b>${PHASE_JP[g.phase]}</b>：昼と夜の指定カードを同時に使うと${HIOU_NAME[me.hiou || "balanced"]}（枚数に数えない）</span>
     ${pairs.map(([d, n]) => `<button class="btn small" data-act="pair" data-d="${d.uid}" data-n="${n.uid}">${d.name}＋${n.name}（シールド-${g.shieldCost(me, d) + g.shieldCost(me, n)}）</button>`).join("")}</div>` : "";
@@ -1398,7 +1419,7 @@ async function saveDeck(deck) {
 /* デッキ編集画面に出すカードの説明（試合中でなくても出せる固定の文） */
 function cardBrief(c, id = c.id) {   // カード一覧（CARDS）の中身には id が入っていないので、呼ぶ側から渡す
   switch (c.type) {
-    case "attack": return `${c.power}ダメージ${c.drain ? "・与ダメの半分HP回復" : ""}${c.recoil ? `・自分もHP-${c.recoil}` : ""}${c.eclipse ? "・日没と夜明けは2倍" : ""}${c.rage ? `・減ったHP${BLOOD.RAGE_STEP}ごとに+1` : ""}${c.hpcost ? `・HPを${c.hpcost}払う` : ""}${c.revenge ? "・前の相手ターンに受けたダメージの半分を上乗せ" : ""}${c.poison ? `・毒${c.poison}` : ""}${c.attr === "both" ? "・昼でも夜でも1.5倍" : ""}${c.splash ? "・与えた分シールド回復" : ""}${c.frenzy ? "・HPが半分以下なら2倍" : ""}`;
+    case "attack": return `${c.power}ダメージ${c.drain ? "・与ダメの半分HP回復" : ""}${c.recoil ? `・自分もHP-${c.recoil}` : ""}${c.eclipse ? "・日没と夜明けは2倍" : ""}${c.rage ? `・減ったHP${BLOOD.RAGE_STEP}ごとに+1` : ""}${c.hpcost ? `・HPを${c.hpcost}払う` : ""}${c.revenge ? "・前の相手ターンに受けたダメージの半分を上乗せ" : ""}${c.poison ? `・毒${c.poison}` : ""}${c.numbing ? "・相手の次のターン、使えるカード-1" : ""}${c.attr === "both" ? "・昼でも夜でも1.5倍" : ""}${c.splash ? "・与えた分シールド回復" : ""}${c.frenzy ? "・HPが半分以下なら2倍" : ""}`;
     case "draw": return `HPを${c.hpcost}払って${c.power}枚引く`;
     case "sutra": return "デッキから仏の怒りを1枚手札に加える";
     case "gassho": return `シールド+${c.power}。怒り状態でも使える`;
@@ -1410,8 +1431,8 @@ function cardBrief(c, id = c.id) {   // カード一覧（CARDS）の中身に�
     case "bloom": return "相手の毒を今すぐ全部HPに入れて、毒を0にする";
     case "convert": return `手札の${c.to === "day" ? "夜" : "昼"}カードを${ATTR_JP[c.to]}属性に変えて1枚引く（1ターンの枚数に数えない）`;
     case "heal": return `HP+${c.power}${c.cure ? "・毒と出血を治す" : ""}`;
-    case "poison": return `毒${c.power}（毎ターンHPに直接）`;
-    case "bleed": return `${c.power}ターン出血（カードを使うたびHP-${R.BLEED_DMG}）`;
+    case "poison": return `毒${c.power}（毎ターンHPに直接）${c.sleep ? "・相手の次のターン、引く枚数-1" : ""}`;
+    case "bleed": return `${c.power}ターン出血（カードを使うたびHP-${R.BLEED_DMG}）${c.numbing ? "・相手の次のターン、使えるカード-1" : ""}`;
     case "counter": return "次に受ける攻撃を半分にし、半分を返す";
     case "bloodshield": return `HPを${c.hpcost}払ってシールド+${c.power}`;
     case "regen": return `${c.turns}ターンの間、毎ターンHP+${c.power}`;
