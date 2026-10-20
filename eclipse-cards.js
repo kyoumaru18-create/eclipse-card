@@ -9,7 +9,7 @@ const R = {
   OUGI_AT: 4,        // 奥義（仏の怒りを含む）：この枚数目を使うと必殺技
   AMATERASU_DMG: 10, TSUKUYOMI_DMG: 10, KODOKU_POISON: 8, KODOKU_MULT: 3, KYOKA_MULT: 1.5,
   DECK_SIZE: 36, MAX_COPIES: 3, BUDDHA_MAX: 4,   // デッキはちょうど36枚。同じカードは3枚まで（奥義は4枚まで）
-  KYOKA_CUT: 0.12,   // 鏡花水月を溜めている間、k枚ごとに受ける攻撃をこの割合ずつ減らす（受けた攻撃の半分を返す）
+  KYOKA_CUT: 0.15,   // 鏡花水月を溜めている間、k枚ごとに受ける攻撃をこの割合ずつ減らす（受けた攻撃の半分を返す）
   KARMA_MULT: 1.5,   // 因果応報：溜めた特殊ダメージをこの倍率で、相手のHPに直接返す
   KARMA_HEAL: 0.5,   // 因果応報：溜めた特殊ダメージのこの割合だけ、自分のHPを回復する
   PLAY_LIMIT: 2,     // 1ターンに使えるカードの枚数（使う・回復・奥義を数える。秘奥の同時使用は数えない）
@@ -109,6 +109,7 @@ const CARDS = {
   karma:    { name: "因果応報", attr: "night", type: "karma",   turns: 3, cost: 3, recover: 3 },
   revenge:  { name: "報復",     attr: "night", type: "attack",  power: 4, revenge: true, cost: 3, recover: 3 },
   thorns:   { name: "棘の鎧",   attr: "night", type: "thorns",  power: 3, turns: 3, cost: 3, recover: 4 },
+  metsubushi: { name: "目潰し", attr: "day",   type: "attack",  power: 3, blind: 2, cost: 2, recover: 2 },
   fang:     { name: "毒牙",     attr: "day",   type: "attack",  power: 4, poison: 2, numbing: 1, cost: 3, recover: 3 },
   corrode:  { name: "腐食",     attr: "night", type: "corrode", cost: 2, recover: 3 },
   bloom:    { name: "毒の開花", attr: "day",   type: "bloom",   cost: 3, recover: 3 },
@@ -132,7 +133,7 @@ const PRESETS = {
     slash: 3, ambush: 3, nightowl: 3, drain: 3, eclipse: 2, moonturn: 2, twilight: 3,
     strike: 2, bomb: 2, bleed: 2, counter: 2, heal: 3, firstaid: 2, tsukuyomi: 4 } },
   venom: { name: "状態異常", cards: {
-    needle: 3, bleed: 3, drain: 3, fang: 3, corrode: 3, bloom: 2, ambush: 2, bomb: 2,
+    needle: 3, bleed: 3, drain: 3, fang: 3, metsubushi: 2, corrode: 1, bloom: 2, ambush: 2, bomb: 2,
     recoil: 2, eclipse: 2, counter: 2, firstaid: 3, heal: 2, kodoku: 4 } },
   counter: { name: "カウンター", cards: {
     counter: 3, parry: 3, revenge: 3, thorns: 2, kyoka: 4, karma: 3, strike: 3, slash: 3,
@@ -222,6 +223,7 @@ function newPlayer(name, isAI, def, chosen, cos = null) {
            guard: 0,            // 金剛（次の自分のターンまで、受ける攻撃-この値）
            karmaTurns: 0, karmaStore: 0,   // 因果応報の残りターン数と、その間に溜めた特殊ダメージ
            numbNext: 0, numb: 0, drowsyNext: 0,   // 痺れ（次の自分のターン、使えるカード-1）・眠り（引く枚数-1）
+           blind: 0,            // 暗闇の残りターン数。その間に引いたカードは裏向き（hidden）
          };
 }
 function hiouOptions(p) { return HIOU_SETS[p.hiou || "balanced"].filter(b => !p.buffs.has(b)); }
@@ -453,6 +455,7 @@ class Game {
     if (!c || !this.canPlay(p, c, mode)) return false;
     this.target = this.opp(p).monsters.some(m => m.uid === target) ? target : null;
     p.hand.splice(p.hand.indexOf(c), 1);
+    delete c.hidden;   // 使えば中身が分かる
     if (!(mode === "use" && c.free)) p.plays = (p.plays || 0) + 1;   // 陽転・月転は使う枚数に数えない
     const before = this.snap();
     this.resolve(p, c, mode);
@@ -478,6 +481,7 @@ class Game {
   slowDown(p, c) {
     const o = this.opp(p);
     if (c.sleep && !o.drowsyNext) { o.drowsyNext = 1; this.log(`${o.name}は眠くなった（次のターン、引く枚数が1枚減る）`); }
+    if (c.blind) { o.blind = Math.max(o.blind || 0, c.blind); this.log(`${o.name}は暗闇になった（${o.blind}ターンの間、引いたカードが裏向きになる）`, "", this.idx(o)); }
     if (c.numbing && !o.numbNext) { o.numbNext = 1; this.log(`${o.name}は痺れた（次のターン、使えるカードが1枚減る）`); }
   }
   resolveUse(p, c) {
@@ -741,9 +745,17 @@ class Game {
     if (p.buffs.has("moonshadow")) o.shield = Math.max(0, o.shield - 1);
     if (p.buffs.has("plague")) this.afflict(p, o, 1);
     if (p.buffs.has("regenplus")) this.heal(p, 2, "再生強化");
-    if (this.round === 1 && this.turnIdx === this.firstIdx) return this.draw(p, R.FIRST_DRAW);
-    if (drowsy) this.log(`${p.name}は眠り（引く枚数-${drowsy}）`);
-    this.draw(p, (p.wrath ? R.WRATH_DRAW : R.DRAW) + (p.buffs.has("draw") ? 1 : 0) - drowsy);
+    if (!p.blind) for (const c of p.hand) delete c.hidden;   // 暗闇が解けたら、裏向きのカードを表に戻す
+    const before = p.hand.length;
+    if (this.round === 1 && this.turnIdx === this.firstIdx) this.draw(p, R.FIRST_DRAW);
+    else {
+      if (drowsy) this.log(`${p.name}は眠り（引く枚数-${drowsy}）`);
+      this.draw(p, (p.wrath ? R.WRATH_DRAW : R.DRAW) + (p.buffs.has("draw") ? 1 : 0) - drowsy);
+    }
+    if (p.blind) {   // 暗闇：このターンに引いたカードは裏向き
+      for (const c of p.hand.slice(before)) c.hidden = true;
+      p.blind--;
+    }
   }
   endTurn(p) {
     const o = this.opp(p);
@@ -814,7 +826,8 @@ const AI = {
     return null;
   },
   pick(g, p) {
-    const o = g.opp(p), hand = p.hand;
+    const o = g.opp(p), hand = p.hand.filter(c => !c.hidden);   // 裏向き（暗闇）のカードは中身が分からないので考えない
+    const hidden = p.hand.filter(c => c.hidden);
     // 奥義は使えるならすぐ溜める
     const now = hand.find(c => isOugi(c) && g.canPlay(p, c, "use"));
     if (now) return [now.uid, "use"];
@@ -822,7 +835,7 @@ const AI = {
       const c = hand.find(c => g.canPlay(p, c, "use"));
       return c && p.shield <= 24 ? [c.uid, "use"] : null;
     }
-    const pairs = g.pairOptions(p).filter(([d, n]) => p.hp + p.shield > d.cost + n.cost + 5);
+    const pairs = g.pairOptions(p).filter(([d, n]) => p.hp + p.shield > d.cost + n.cost + 5 && !d.hidden && !n.hidden);
     if (pairs.length) {
       const [d, n] = pairs.reduce((a, b) => (b[0].cost + b[1].cost < a[0].cost + a[1].cost ? b : a));
       return ["pair", d.uid, n.uid];
@@ -843,6 +856,7 @@ const AI = {
       if (s != null && (!best || s > best[0])) best = [s, c.uid];
     }
     if (best) return [best[1], "use"];
+    if (hidden.length && p.shield >= this.LOW) return [hidden[0].uid, "use"];   // 暗闇：シールドに余裕があれば、裏向きのカードを賭けで使ってみる
     if (p.shield < this.LOW) {
       let b = null;
       for (const c of hand) {
@@ -851,6 +865,7 @@ const AI = {
         if (!b || sc[0] > b[0][0] || (sc[0] === b[0][0] && sc[1] > b[0][1])) b = [sc, c.uid];
       }
       if (b) return [b[1], "recover"];
+      if (hidden.length) return [hidden[0].uid, "recover"];   // 表のカードがなければ、裏向きのカードを回復に回してみる
     }
     return null;
   },
@@ -1063,6 +1078,7 @@ function statusChips(p) {
   if (p.numbNext) tag(bad, "痺れ", "次のターン、使えるカードが1枚減る");
   if (p.numb && p === g.active) tag(bad, "痺れ中", "このターン使えるカードが1枚減っている");
   if (p.drowsyNext) tag(bad, "眠り", "次のターン、引く枚数が1枚減る");
+  if (p.blind || p.hand.some(c => c.hidden)) tag(bad, `暗闇${p.blind ? ` 残${p.blind}` : ""}`, "引いたカードが裏向き");
   const ot = charge(g.opp(p), "tsukuyomi");
   if (ot) tag(bad, `回復-${ot}`, "相手の月読：シールド回復が減る");
   if (p.counter) tag(good, "反撃の構え", "次の攻撃を半分にして半分返す");
@@ -1162,6 +1178,7 @@ function cardMain(p, c) {
     if (c.revenge) extra += `前の相手ターンに受けたダメージ（${p.revengeBase || 0}）の半分を上乗せ`;
     if (c.poison) extra += `＋毒${c.poison}`;
     if (c.numbing) extra += "＋相手を痺れさせる";
+    if (c.blind) extra += `＋相手を${c.blind}ターン暗闇（引いたカードが裏向き）`;
     if (c.attr === "both" && m === 1) extra += "昼でも夜でも1.5倍";
     if (c.splash) extra += "与えた分シールド回復";
     if (c.frenzy) extra += p.hp <= R.MAX_HP / 2 ? "（HP半分以下で2倍）" : "HPが半分以下なら2倍";
@@ -1214,7 +1231,8 @@ let sel = null;   // { uid, mode: null | "use" | "recover", target: 狙う相手
 function selectedCard() { return sel && g.players[seat].hand.find(c => c.uid === sel.uid); }
 function checkSel() {
   const c = selectedCard();
-  if (!c || !myTurnNow() || (sel.mode && !g.canPlay(g.players[seat], c, sel.mode))) sel = null;
+  // 裏向き（暗闇）のカードは、使えるかどうかを確かめない（確かめると中身が分かってしまう）
+  if (!c || !myTurnNow() || (sel.mode && !c.hidden && !g.canPlay(g.players[seat], c, sel.mode))) sel = null;
   else if (sel.target != null && !g.players[1 - seat].monsters.some(m => m.uid === sel.target)) sel.target = null;
 }
 /* 攻撃カードを「使う」で選んでいて、相手の場にモンスターがいる（狙いを選べる） */
@@ -1224,10 +1242,13 @@ function selAiming() {
 }
 function selPreview() {
   checkSel();
-  return sel?.mode ? simulate(sel.uid, sel.mode, sel.target ?? null) : null;
+  return sel?.mode && !selectedCard()?.hidden ? simulate(sel.uid, sel.mode, sel.target ?? null) : null;
 }
 function selGuideHTML(me) {
   const c = selectedCard();
+  if (c.hidden) return `<div class="act-row sel"><b class="sel-name">裏向きのカード</b><span class="act-hint">暗闇で中身が分からない。もう一度押すと使う（使えないカードだったら何も起きない）</span>
+    <span class="grow"></span>${[["use", "使う"], ["recover", "回復"]].map(([m, l]) => `<button class="btn small${sel.mode === m ? " primary" : ""}" data-act="${m === "use" ? "use" : "rec"}" data-uid="${c.uid}">${sel.mode === m ? `${l}で決定` : l}</button>`).join("")}
+    <button class="btn small" data-act="cancel">やめる</button></div>`;
   const modes = isOugi(c) ? [["use", "溜める"]] : [["use", "使う"], ["recover", "回復"]];
   const btns = modes.map(([m, label]) => {
     const ok = g.canPlay(me, c, m), on = sel.mode === m;
@@ -1238,7 +1259,7 @@ function selGuideHTML(me) {
     `<button class="btn small${sel.target == null ? " on" : ""}" data-act="aim" data-t="">${nameOf(1 - seat)}</button>`,
     ...g.players[1 - seat].monsters.map(m => `<button class="btn small${sel.target === m.uid ? " on" : ""}" data-act="aim" data-t="${m.uid}">${m.name}</button>`),
   ].join("")}</span>` : "";
-  const hint = sel.mode ? (cfg.confirm2 ? "点滅している部分が変わる・もう一度押すと決定" : "") : "使うか回復を選ぶ";
+  const hint = c.hidden ? "暗闇で中身が分からない。使うまで何が起きるか分からない" : sel.mode ? (cfg.confirm2 ? "点滅している部分が変わる・もう一度押すと決定" : "") : "使うか回復を選ぶ";
   return `<div class="act-row sel"><b class="sel-name">${c.name}</b>${hint ? `<span class="act-hint">${hint}</span>` : ""}${aim}${warn}
     <span class="grow"></span>${btns}<button class="btn small" data-act="cancel">やめる</button></div>`;
 }
@@ -1296,6 +1317,18 @@ function render() {
 
   $("deckInfo").textContent = `${me.hand.length}枚　デッキ残り${me.deck.length}`;
   $("hand").innerHTML = me.hand.map(c => {
+    if (c.hidden) {   // 暗闇：中身は見せない。使えるかどうかも、使ってみるまで分からない
+      const picked = sel?.uid === c.uid, armed = m => picked && sel.mode === m;
+      const can = myTurn && (me.plays || 0) < playLimit(me) && !me.wrath;
+      return `<div class="card hidden-card${can ? "" : " off"}${picked ? " lifted" : sel ? " dim" : ""}" data-pick="${c.uid}">
+        <span class="c-top"><span>暗闇</span><span>？</span></span>
+        <span class="c-name">？？？</span>
+        <span class="c-main"><big>？</big>暗闇で見えない。使うまで何のカードか分からない</span>
+        <span class="c-btns">
+          <button class="c-btn use${armed("use") ? " armed" : ""}" data-act="use" data-uid="${c.uid}" ${can ? "" : "disabled"}>${armed("use") ? "<span>決定する</span>" : "<span>使う</span><span>？</span>"}</button>
+          <button class="c-btn rec${armed("recover") ? " armed" : ""}" data-act="rec" data-uid="${c.uid}" ${can ? "" : "disabled"}>${armed("recover") ? "<span>決定する</span>" : "<span>回復</span><span>？</span>"}</button>
+        </span></div>`;
+    }
     const mark = me.designated.day.includes(c.id) ? "★昼の指定" : me.designated.night.includes(c.id) ? "★夜の指定" : "";
     const canUse = myTurn && g.canPlay(me, c, "use");
     const canRec = myTurn && g.canPlay(me, c, "recover");
@@ -1419,7 +1452,7 @@ async function saveDeck(deck) {
 /* デッキ編集画面に出すカードの説明（試合中でなくても出せる固定の文） */
 function cardBrief(c, id = c.id) {   // カード一覧（CARDS）の中身には id が入っていないので、呼ぶ側から渡す
   switch (c.type) {
-    case "attack": return `${c.power}ダメージ${c.drain ? "・与ダメの半分HP回復" : ""}${c.recoil ? `・自分もHP-${c.recoil}` : ""}${c.eclipse ? "・日没と夜明けは2倍" : ""}${c.rage ? `・減ったHP${BLOOD.RAGE_STEP}ごとに+1` : ""}${c.hpcost ? `・HPを${c.hpcost}払う` : ""}${c.revenge ? "・前の相手ターンに受けたダメージの半分を上乗せ" : ""}${c.poison ? `・毒${c.poison}` : ""}${c.numbing ? "・相手の次のターン、使えるカード-1" : ""}${c.attr === "both" ? "・昼でも夜でも1.5倍" : ""}${c.splash ? "・与えた分シールド回復" : ""}${c.frenzy ? "・HPが半分以下なら2倍" : ""}`;
+    case "attack": return `${c.power}ダメージ${c.drain ? "・与ダメの半分HP回復" : ""}${c.recoil ? `・自分もHP-${c.recoil}` : ""}${c.eclipse ? "・日没と夜明けは2倍" : ""}${c.rage ? `・減ったHP${BLOOD.RAGE_STEP}ごとに+1` : ""}${c.hpcost ? `・HPを${c.hpcost}払う` : ""}${c.revenge ? "・前の相手ターンに受けたダメージの半分を上乗せ" : ""}${c.poison ? `・毒${c.poison}` : ""}${c.numbing ? "・相手の次のターン、使えるカード-1" : ""}${c.blind ? `・相手を${c.blind}ターン暗闇（引いたカードが裏向き）` : ""}${c.attr === "both" ? "・昼でも夜でも1.5倍" : ""}${c.splash ? "・与えた分シールド回復" : ""}${c.frenzy ? "・HPが半分以下なら2倍" : ""}`;
     case "draw": return `HPを${c.hpcost}払って${c.power}枚引く`;
     case "sutra": return "デッキから仏の怒りを1枚手札に加える";
     case "gassho": return `シールド+${c.power}。怒り状態でも使える`;
@@ -1667,7 +1700,12 @@ function afterMyAction() {
   if (g.over) return finish();
   if (g.pending) showPending();
 }
-function humanPlay(uid, m, target = null) { if (myTurnNow() && g.play(g.players[seat], uid, m, target)) afterMyAction(); }
+function humanPlay(uid, m, target = null) {
+  if (!myTurnNow()) return;
+  const me = g.players[seat], c = me.hand.find(x => x.uid === uid);
+  if (g.play(me, uid, m, target)) return afterMyAction();
+  if (c?.hidden) { g.log(`裏向きのカードは${m === "use" ? "今は使えない" : "回復に回せない"}カードだった`, "warn"); render(); }   // 暗闇：使えないカードだったと分かる
+}
 function humanPair(d, n) { if (myTurnNow() && g.playPair(g.players[seat], d, n)) afterMyAction(); }
 async function endMyTurn() {
   if (!myTurnNow()) return;
