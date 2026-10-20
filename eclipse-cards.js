@@ -39,9 +39,8 @@ const OUGI = {
 /* このターンに使えるカードの枚数（痺れていれば減る。最低1枚） */
 function playLimit(p) { return Math.max(1, R.PLAY_LIMIT - (p.numb || 0)); }
 function charge(p, key) { return (p.stacks?.[key] || []).length; }
-/* 昼は、毒のダメージが半分・状態異常のカードの消費が2倍（engine.py と同じ） */
-const DAY_STATUS_COST = 2, DAY_POISON_CUT = 0.5, NIGHT_POISON_MULT = 1;
-function isStatus(c) { return ["poison", "bleed", "linger", "bloom", "corrode"].includes(c.type) || !!(c.poison || c.blind || c.sleep || c.numbing); }
+/* 昼は、毒のダメージが半分・毒の減り方が2倍（engine.py と同じ） */
+const DAY_POISON_CUT = 0.5, DAY_POISON_DECAY = 2, NIGHT_POISON_MULT = 1;
 function isOugi(c) { return c.type === "buddha" || c.type === "ougi"; }
 /* 秘奥：日没・夜明けに昼と夜の指定カードを同時に使うと1つ選べる。選べる候補はデッキのタイプで変わる */
 const BUFFS = {
@@ -334,10 +333,7 @@ class Game {
     return Math.max(0, Math.floor(a + 0.5));
   }
   /* シールド消費（秘奥・灼光なら昼カードは-1） */
-  shieldCost(p, c) {
-    const cost = p.buffs.has("scorch") && c.attr === "day" ? Math.max(0, c.cost - 1) : c.cost;
-    return isStatus(c) && this.phase === "day" ? cost * DAY_STATUS_COST : cost;
-  }
+  shieldCost(p, c) { return p.buffs.has("scorch") && c.attr === "day" ? Math.max(0, c.cost - 1) : c.cost; }
   /* 攻撃カードの基本ダメージ（狂血は減っているHPで増え、修羅はHPを払うカードを強くする） */
   attackPower(p, c) {
     let power = c.power;
@@ -801,7 +797,7 @@ class Game {
     if (p.wrath) p.wrathTurns = (p.wrathTurns || 0) + 1;
     if (p.poison) {
       this.dotHit(p, p.poison * this.poisonMult(p), "毒");
-      p.poison--;
+      p.poison = Math.max(0, p.poison - (this.phase === "day" ? DAY_POISON_DECAY : 1));
       if (this.over) return;
     }
     p.calm = false;   // 不動心は、このターンの毒を受けたところまで
@@ -870,12 +866,7 @@ const AI = {
     }
     return keep;
   },
-  /* 昼の状態異常カードは消費が倍なので、価値も半分（engine.py の score と同じ） */
   score(g, p, c) {
-    const s = this.baseScore(g, p, c);
-    return s != null && isStatus(c) && g.phase === "day" ? s / DAY_STATUS_COST : s;
-  },
-  baseScore(g, p, c) {
     const o = g.opp(p);
     if (c.type === "attack" && c.recoil && p.hp <= 15 + c.recoil) return null;
     if (c.hpcost && p.hp <= c.hpcost + 12) return null;   // HPを払うカードは、HPに余裕があるときだけ
@@ -1182,7 +1173,7 @@ function statusChips(p) {
   const good = [], bad = [];
   const tag = (list, name, desc, cls = "") => list.push(`<span class="st ${cls}"><b>${name}</b>${desc ? `<small>${desc}</small>` : ""}</span>`);
   if (p.wrath) tag(bad, "怒り状態", `受ける攻撃-${R.WRATH_REDUCE}・合掌と仏の怒りしか使えない・必殺技${finisherBase(p)}`, "wrath");
-  if (p.poison) tag(bad, `毒${p.poison}`, `ターン開始にHP-${Math.floor(p.poison * g.poisonMult(p) + 0.5)}${g.phase === "day" ? "（昼は半分）" : ""}`, "poison");
+  if (p.poison) tag(bad, `毒${p.poison}`, `ターン開始にHP-${Math.floor(p.poison * g.poisonMult(p) + 0.5)}${g.phase === "day" ? "（昼は半分・2ずつ減る）" : ""}`, "poison");
   if (p.bleed) tag(bad, `出血 残${p.bleed}`, `カードを使うたびHP-${Math.floor(R.BLEED_DMG * g.dotMult(p) + 0.5)}`, "bleed");
   if (p.recoverHalf) tag(bad, "回復半減", "月読：シールド回復が半分");
   if (p.numbNext) tag(bad, "痺れ", "次のターン、使えるカードが1枚減る");
