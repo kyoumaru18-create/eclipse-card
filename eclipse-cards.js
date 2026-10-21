@@ -177,6 +177,8 @@ const CARDS = {
   meikyo:   { name: "明鏡止水", attr: "none",  type: "ougi",    cost: 0, recover: 0 },
   nehan:    { name: "涅槃",     attr: "none",  type: "ougi",    cost: 0, recover: 0 },
   chimatsuri: { name: "血祭り", attr: "none",  type: "ougi",    cost: 0, recover: 0 },
+  hissen:   { name: "緋の一閃", attr: "day",   type: "attack",  power: 5, hpcost: 4, cost: 0, recover: 3 },
+  chizome:  { name: "血染めの陽", attr: "day", type: "attack",  power: 1, paidbonus: true, hpcost: 2, cost: 0, recover: 3 },
   berserk:  { name: "狂乱",     attr: "night", type: "berserk", turns: 3, cost: 2, recover: 3 },
   dohatsu:  { name: "怒髪天",   attr: "night", type: "dohatsu", power: 2, turns: 3, wrathok: true, cost: 2, recover: 3 },
   shura:   { name: "修羅",       attr: "none",  type: "ougi",    cost: 0, recover: 0 },
@@ -194,7 +196,7 @@ const PRESETS = {
   buddha: { name: "仏の怒り", cards: {
     buddha: 4, sutra: 2, gassho: 2, kongo: 2, zazen: 2, fudoushin: 2, dohatsu: 2, counter: 3, heal: 3, firstaid: 3, katsu: 2, nembutsu: 2, slash: 2, niou: 2, drain: 2, needle: 1 } },
   blood: { name: "自傷", cards: {
-    bloodblade: 3, bloodlust: 3, bloodshield: 3, regen: 3, recoil: 3, shura: 4, bloodpact: 2, backsplash: 2, bloodwaltz: 2, koumori: 2, rengeki: 2, berserk: 2, heal: 2, firstaid: 3 } },
+    bloodblade: 3, bloodlust: 3, bloodshield: 3, regen: 3, recoil: 3, shura: 4, bloodpact: 2, backsplash: 2, hissen: 2, chizome: 2, koumori: 2, berserk: 2, heal: 2, firstaid: 3 } },
 };
 const DEFAULT_PRESET = "buddha";   // 最初に使うデッキ。保存データがおかしいときもこれに戻す
 const DECK = PRESETS[DEFAULT_PRESET].cards;
@@ -411,6 +413,7 @@ class Game {
     let power = c.power;
     power += polarAtk(p);   // 陽光・零度
     if (c.zeal) power += 2 * charge(p, "buddha");   // 喝：仏の怒りの溜め×2
+    if (c.paidbonus) power += p.hpPaidTurn || 0;   // 血染めの陽：このターンに払ったHPの分（このカードで払った分も入る）
     if (c.fury) power += 2 * (p.usedTurn || 0) + Math.floor((p.hpPaidTurn || 0) / 3);   // 血の連撃：このターン使ったカード・払ったHP
     if (c.rage) power += Math.floor(Math.max(0, R.MAX_HP - p.hp) / BLOOD.RAGE_STEP);
     if (p.berserkTurns) power += debuffs(p);   // 狂乱：自分のデバフの数だけ
@@ -1605,6 +1608,7 @@ function cardMain(p, c) {
     if (c.paralyze) extra += "＋相手を麻痺させる（次のターン、ドローできない）";
     if (c.allday && m === 1) extra += "昼でも夜でも1.5倍";
     if (c.zeal) extra += "＋仏の怒りの溜め×2";
+    if (c.paidbonus) extra += `（このターンに払ったHP${p.hpPaidTurn || 0}＋このカードの${c.hpcost}を足す）`;
     if (c.fury) extra += `（このターン使った${p.usedTurn || 0}枚・払ったHP${p.hpPaidTurn || 0}で上がる）`;
     if (c.blind) extra += `＋相手を${c.blind}ターン暗闇（引いたカードが裏向き）`;
     if (c.attr === "both" && m === 1) extra += "昼でも夜でも1.5倍";
@@ -1915,7 +1919,7 @@ async function saveDeck(deck) {
 /* デッキ編集画面に出すカードの説明（試合中でなくても出せる固定の文） */
 function cardBrief(c, id = c.id) {   // カード一覧（CARDS）の中身には id が入っていないので、呼ぶ側から渡す
   switch (c.type) {
-    case "attack": return `${c.power}ダメージ${c.drain ? "・与ダメの半分HP回復" : ""}${c.recoil ? `・自分もHP-${c.recoil}` : ""}${c.eclipse ? "・日没と夜明けは2倍" : ""}${c.rage ? `・減ったHP${BLOOD.RAGE_STEP}ごとに+1` : ""}${c.hpcost ? `・HPを${c.hpcost}払う` : ""}${c.revenge ? "・前の相手ターンに受けたダメージの半分を上乗せ" : ""}${c.poison ? `・毒${c.poison}` : ""}${c.numbing ? "・相手の次のターン、使えるカード-1" : ""}${c.paralyze ? "・相手の次のターン、ドローできない" : ""}${c.blind ? `・相手を${c.blind}ターン暗闇（引いたカードが裏向き）` : ""}${c.allday ? "・昼でも夜でも1.5倍" : ""}${c.zeal ? "・仏の怒りの溜め×2を足す" : ""}${c.fury ? "・このターン使ったカード1枚ごとに+2、払ったHP3ごとに+1" : ""}${c.attr === "both" ? "・昼でも夜でも1.5倍" : ""}${c.splash ? "・与えた分シールド回復" : ""}${c.frenzy ? "・HPが半分以下なら2倍" : ""}`;
+    case "attack": return `${c.power}ダメージ${c.drain ? "・与ダメの半分HP回復" : ""}${c.recoil ? `・自分もHP-${c.recoil}` : ""}${c.eclipse ? "・日没と夜明けは2倍" : ""}${c.rage ? `・減ったHP${BLOOD.RAGE_STEP}ごとに+1` : ""}${c.hpcost ? `・HPを${c.hpcost}払う` : ""}${c.revenge ? "・前の相手ターンに受けたダメージの半分を上乗せ" : ""}${c.poison ? `・毒${c.poison}` : ""}${c.numbing ? "・相手の次のターン、使えるカード-1" : ""}${c.paralyze ? "・相手の次のターン、ドローできない" : ""}${c.blind ? `・相手を${c.blind}ターン暗闇（引いたカードが裏向き）` : ""}${c.allday ? "・昼でも夜でも1.5倍" : ""}${c.zeal ? "・仏の怒りの溜め×2を足す" : ""}${c.fury ? "・このターン使ったカード1枚ごとに+2、払ったHP3ごとに+1" : ""}${c.paidbonus ? "・このターンに払ったHPの分だけ上乗せ" : ""}${c.attr === "both" ? "・昼でも夜でも1.5倍" : ""}${c.splash ? "・与えた分シールド回復" : ""}${c.frenzy ? "・HPが半分以下なら2倍" : ""}`;
     case "draw": return `HPを${c.hpcost}払って${c.power}枚引く`;
     case "sutra": return "デッキから仏の怒りを1枚手札に加える";
     case "gassho": return `シールド+${c.power}。怒り状態でも使える`;
