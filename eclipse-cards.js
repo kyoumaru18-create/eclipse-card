@@ -37,7 +37,7 @@ const OUGI = {
   shura:     { name: "修羅",     desc: "HP10回復＋以降、HPを払うカードのダメージが1.25倍", charge: k => `HPを払うカードのダメージ+${k}` },
 };
 /* このターンに使えるカードの枚数（痺れていれば減る。最低1枚） */
-function playLimit(p) { return Math.max(1, R.PLAY_LIMIT - (p.numb || 0)); }
+function playLimit(p) { return Math.max(1, (p.kageuchi ? KAGEUCHI_LIMIT : R.PLAY_LIMIT) - (p.numb || 0)); }
 function charge(p, key) { return (p.stacks?.[key] || []).length; }
 /* 昼は、毒のダメージが半分・毒の減り方が2倍（engine.py と同じ） */
 const DAY_POISON_CUT = 0.5, DAY_POISON_DECAY = 2, NIGHT_POISON_MULT = 1;
@@ -70,10 +70,14 @@ const HIOU_SETS = {
   counter: ["steadfast", "draw", "riposte"],
   blood: ["bloodthirst", "undying", "attack"],
 };
-/* 昼特化（昼寄り）と夜特化（夜寄り）は秘奥のかわりに白夜・極夜：{ at: 使える時間帯, to: そのあとの時間帯をこれにする }
-   白夜：日没に昼と夜の指定カードを同時に使うと、そのあとの夜の3巡が両者にとって昼になる。起こした本人の昼カードは2.5倍。極夜はその逆 */
-const POLAR = { day: { at: "dusk", to: "day", name: "白夜" }, night: { at: "dawn", to: "night", name: "極夜" } };
-const POLAR_MULT = 2.5;
+/* 昼特化・夜特化は秘奥のかわりに、自分の場がずっと白夜（昼）・極夜（夜）。日没・夜明けも来ない。指定カードは自分の属性だけで4種
+   白夜：自分のターン3回ごとに陽光+1（攻撃+1ずつ）。指定カード3枚を捨てると日蝕（そのターンは影討ち：使えるカード3枚・与えるダメージ2倍）
+   極夜：自分のターン3回ごとに零度+1（攻撃+1・受ける攻撃-1ずつ）。指定カード3枚を捨てると月食（相手のHPとシールドの2割を奪う）。
+         自分の12ターン目に1回だけ、新月（相手とHPを入れ替える）を使える */
+const POLAR = { day: { name: "白夜", stack: "陽光", trio: "日蝕" }, night: { name: "極夜", stack: "零度", trio: "月食" } };
+const POLAR_EVERY = 3, YOUKOU_DMG = 1, REIDO_DMG = 1, REIDO_CUT = 1, TRIO = 3;
+const KAGEUCHI_LIMIT = 3, KAGEUCHI_MULT = 2, GESSHOKU_RATE = 0.2, NEWMOON_TURN = 12;
+function polarAtk(p) { return p.polar ? (p.hiou === "day" ? YOUKOU_DMG : REIDO_DMG) * p.polar : 0; }
 const HIOU_NAME = { day: "白夜", night: "極夜", balanced: "蝕の秘奥", venom: "毒の秘奥", counter: "鏡の秘奥", blood: "血の秘奥" };
 const HIOU_LEAN = 4;   // 昼（夜）カードが夜（昼）カードよりこの枚数以上多ければ昼寄り（夜寄り）
 /* デッキのタイプ。蠱毒→毒、鏡花水月→カウンター、修羅→自傷、天照→昼、月読→夜。それ以外は昼と夜のカードの枚数で決まる */
@@ -201,15 +205,21 @@ function makeDeck(def = DECK) {
 const DESIGNATED_PER_ATTR = 2;
 function autoDesignated(def, chosen) {
   const out = {};
+  const own = POLAR[deckType(def)] ? deckType(def) : null;   // 昼特化・夜特化は、自分の属性だけで4種
   for (const attr of ["day", "night"]) {
+    if (own && attr !== own) { out[attr] = []; continue; }
+    const max = desMax(own, attr);
     const ids = Object.keys(def).filter(id => CARDS[id]?.attr === attr && !isOugi(CARDS[id]) && def[id] > 0);
-    const picked = (chosen?.[attr] || []).filter(id => ids.includes(id)).slice(0, DESIGNATED_PER_ATTR);
+    const want = [...(chosen?.[attr] || []), ...(own ? chosen?.[attr === "day" ? "night" : "day"] || [] : [])];
+    const picked = [...new Set(want.filter(id => ids.includes(id)))].slice(0, max);
     for (const id of ids.sort((a, b) => def[b] - def[a] || a.localeCompare(b)))
-      if (picked.length < DESIGNATED_PER_ATTR && !picked.includes(id)) picked.push(id);
+      if (picked.length < max && !picked.includes(id)) picked.push(id);
     out[attr] = picked;
   }
   return out;
 }
+/* 指定カードの種類の上限（昼特化・夜特化は自分の属性で4種、相手の属性は0） */
+function desMax(own, attr) { return own ? (attr === own ? 2 * DESIGNATED_PER_ATTR : 0) : DESIGNATED_PER_ATTR; }
 /* cos：見た目 { name, icon, title, frame, sleeve, mat, arts: {カードid: 絵柄} }（ショップで買ったもの。強さには関係しない） */
 function newPlayer(name, isAI, def, chosen, cos = null) {
   const deck = makeDeck(def);
@@ -236,6 +246,8 @@ function newPlayer(name, isAI, def, chosen, cos = null) {
            karmaTurns: 0, karmaStore: 0,   // 因果応報の残りターン数と、その間に溜めた特殊ダメージ
            numbNext: 0, numb: 0, drowsyNext: 0,   // 痺れ（次の自分のターン、使えるカード-1）・眠り（引く枚数-1）
            blind: 0,            // 暗闇の残りターン数。その間に引いたカードは裏向き（hidden）
+           ownTurns: 0, polar: 0,   // 自分のターンの回数・陽光（白夜）／零度（極夜）の数
+           kageuchi: false, trioTurn: -1, newmoonUsed: false,   // 日蝕の影討ち（このターン）・日蝕／月食を使ったターン・新月を使った
          };
 }
 function hiouOptions(p) { return HIOU_SETS[p.hiou || "balanced"].filter(b => !p.buffs.has(b)); }
@@ -291,10 +303,11 @@ class Game {
   get phase() { return this.override?.[this.round] || CYCLE[(this.round - 1) % CYCLE.length]; }
   get active() { return this.players[this.turnIdx]; }
   opp(p) { return p === this.players[0] ? this.players[1] : this.players[0]; }
-  isTransition() { return this.phase === "dusk" || this.phase === "dawn"; }
+  /* p から見た時間帯。昼特化はずっと昼（白夜）、夜特化はずっと夜（極夜） */
+  phaseFor(p) { return p && POLAR[p.hiou] ? p.hiou : this.phase; }
+  isTransition(p = null) { const ph = this.phaseFor(p); return ph === "dusk" || ph === "dawn"; }
   buffReady(p) {
-    const po = POLAR[p.hiou];   // 白夜は日没だけ、極夜は夜明けだけ
-    if (po) return this.phase === po.at && p.buffRound !== this.round;
+    if (POLAR[p.hiou]) return false;   // 昼特化・夜特化は秘奥のかわりに白夜・極夜
     return this.isTransition() && p.buffRound !== this.round && hiouOptions(p).length > 0;
   }
   roundsToTransition() {
@@ -313,23 +326,29 @@ class Game {
     if (dead.length && !this.over) { this.over = true; this.winnerIdx = dead.length === 2 ? null : this.idx(this.opp(dead[0])); }
   }
   cardMult(c, p = null) {
-    if (c.eclipse) return this.isTransition() ? R.ECLIPSE_BONUS : 1;
+    if (c.eclipse) return this.isTransition(p) ? R.ECLIPSE_BONUS : 1;
     if (c.allday) return this.attrMult("both", p);   // 残照・朧月：昼でも夜でも1.5倍（日没・夜明けは等倍）
     return this.attrMult(c.attr, p);
   }
   attrMult(attr, p = null) {
-    if (p && this.polarOwner?.[this.round] === this.idx(p) && attr === this.phase) return POLAR_MULT;   // 白夜・極夜を起こした本人
+    const ph = this.phaseFor(p);
     if (attr === "both")   // 薄明の刃：昼でも夜でも1.5倍（日没・夜明けは等倍）
-      return this.phase === "day" || this.phase === "night" || (p && p.blessing.length) ? R.ATTR_BONUS : 1;
-    return attr === this.phase || (p && p.blessing.includes(attr)) ? R.ATTR_BONUS : 1; }
+      return ph === "day" || ph === "night" || (p && p.blessing.length) ? R.ATTR_BONUS : 1;
+    return attr === ph || (p && p.blessing.includes(attr)) ? R.ATTR_BONUS : 1; }
   /* 毒・出血のダメージ倍率（日蝕の深まり×相手の蠱毒） */
   dotMult(victim) { return this.escalation() * (this.opp(victim).kodoku ? R.KODOKU_MULT : 1); }
-  poisonMult(victim) { return this.dotMult(victim) * (this.phase === "day" ? DAY_POISON_CUT : this.phase === "night" ? NIGHT_POISON_MULT : 1); }
+  poisonMult(victim) { const ph = this.phaseFor(victim); return this.dotMult(victim) * (ph === "day" ? DAY_POISON_CUT : ph === "night" ? NIGHT_POISON_MULT : 1); }
   /* 日蝕の深まり。昼夜が1周するごとにダメージ倍率が上がる */
   escalation() { return 1 + R.ESCALATION * Math.floor((this.round - 1) / CYCLE.length); }
-  outgoing(p, base, mult) { let d = base * mult * this.escalation(); if (p.buffs.has("attack")) d *= R.ATK_BUFF; return d; }
+  outgoing(p, base, mult) {
+    let d = base * mult * this.escalation();
+    if (p.kageuchi) d *= KAGEUCHI_MULT;   // 日蝕（影討ち）
+    if (p.buffs.has("attack")) d *= R.ATK_BUFF;
+    return d;
+  }
   incoming(t, a) {
     if (t.buffs.has("defense")) a *= R.DEF_BUFF;
+    if (t.hiou === "night") a -= REIDO_CUT * (t.polar || 0);   // 零度
     if (t.wrath) a -= R.WRATH_REDUCE;
     else a -= 2 * charge(t, "buddha");      // 仏の怒りを溜めている間：-2k
     if (t.buffs.has("steadfast")) a -= 5;   // 秘奥・不動
@@ -342,6 +361,7 @@ class Game {
   /* 攻撃カードの基本ダメージ（狂血は減っているHPで増え、修羅はHPを払うカードを強くする） */
   attackPower(p, c) {
     let power = c.power;
+    power += polarAtk(p);   // 陽光・零度
     if (c.zeal) power += 2 * charge(p, "buddha");   // 喝：仏の怒りの溜め×2
     if (c.fury) power += 2 * (p.usedTurn || 0) + Math.floor((p.hpPaidTurn || 0) / 3);   // 血の連撃：このターン使ったカード・払ったHP
     if (c.rage) power += Math.floor(Math.max(0, R.MAX_HP - p.hp) / BLOOD.RAGE_STEP);
@@ -596,7 +616,7 @@ class Game {
       this.log(`${o.name}は蝕まれた（${c.turns}ターンの間、ターンの始めに毒${o.lingerAmt}）`);
     } else if (c.type === "sunshield") {
       const b = p.shield;
-      p.shield = Math.min(R.SHIELD_CAP, p.shield + c.power * (this.phase === "night" ? 2 : 1));
+      p.shield = Math.min(R.SHIELD_CAP, p.shield + c.power * (this.phaseFor(p) === "night" ? 2 : 1));
       this.log(`日輪の盾で${p.name}のシールド ${b}→${p.shield}`, "shield", this.idx(p), p.shield - b);
     } else if (c.type === "shieldbreak") {
       const n = Math.min(o.shield, c.power);
@@ -771,6 +791,46 @@ class Game {
       if (ok(d) && ok(n)) out.push([d, n]);
     return out;
   }
+  /* 日蝕・月食に使える手札の指定カード（3枚以上あれば発動できる。1ターン1回） */
+  trioCards(p) {
+    if (!POLAR[p.hiou] || p.trioTurn === p.ownTurns || p.wrath || this.over) return [];
+    const ids = [...p.designated.day, ...p.designated.night];
+    const cs = p.hand.filter(c => ids.includes(c.id));
+    return cs.length >= TRIO ? cs : [];
+  }
+  /* 指定カード3枚を捨てて（効果は出ない・枚数に数えない）、白夜なら日蝕（影討ち）、極夜なら月食 */
+  playTrio(p, uids) {
+    const ok = this.trioCards(p);
+    const cs = uids.map(u => ok.find(c => c.uid === u));
+    if (cs.length !== TRIO || cs.some(c => !c) || new Set(uids).size !== TRIO) return false;
+    const before = this.snap();
+    for (const c of cs) { p.hand.splice(p.hand.indexOf(c), 1); delete c.hidden; p.drop.push(c); }
+    p.trioTurn = p.ownTurns;
+    const names = cs.map(c => c.name).join("・"), o = this.opp(p);
+    if (p.hiou === "day") {
+      p.kageuchi = true;
+      this.log(`日蝕：${p.name}は${names}を捨てて影討ちに入った（このターン、使えるカード${KAGEUCHI_LIMIT}枚・与えるダメージ${KAGEUCHI_MULT}倍）`, "polar", this.idx(p), "日蝕");
+    } else {
+      const hp = Math.floor(o.hp * GESSHOKU_RATE), sh = Math.floor(o.shield * GESSHOKU_RATE);
+      o.hp -= hp; o.shield -= sh;
+      p.hp = Math.min(R.MAX_HP, p.hp + hp); p.shield = Math.min(R.SHIELD_CAP, p.shield + sh);
+      this.log(`月食：${p.name}は${names}を捨てて、${o.name}のHP${hp}・シールド${sh}を奪った`, "polar", this.idx(p), "月食");
+      this.checkDead();
+    }
+    this.summary(`${p.name}の${POLAR[p.hiou].trio}`, before);
+    return true;
+  }
+  newmoonReady(p) { return p.hiou === "night" && p.ownTurns === NEWMOON_TURN && !p.newmoonUsed && !this.over; }
+  /* 新月：自分の12ターン目に1回だけ、相手とHPを入れ替える */
+  newMoon(p) {
+    if (!this.newmoonReady(p)) return false;
+    const o = this.opp(p), before = this.snap();
+    p.newmoonUsed = true;
+    [p.hp, o.hp] = [Math.min(R.MAX_HP, o.hp), Math.min(R.MAX_HP, p.hp)];
+    this.log(`新月：${p.name}と${o.name}のHPが入れ替わった（${p.hp}・${o.hp}）`, "polar", this.idx(p), "新月");
+    this.summary(`${p.name}の新月`, before);
+    return true;
+  }
   playPair(p, dUid, nUid) {
     const pair = this.pairOptions(p).find(([d, n]) => d.uid === dUid && n.uid === nUid);
     if (!pair) return false;
@@ -805,6 +865,13 @@ class Game {
   beginTurn(p) {
     this.log(`第${this.round}巡【${PHASE_JP[this.phase]}】${p.name}のターン`, "turn");
     p.usedTurn = 0; p.hpPaidTurn = 0;
+    p.kageuchi = false;
+    p.ownTurns = (p.ownTurns || 0) + 1;
+    const po = POLAR[p.hiou];
+    if (po && p.ownTurns % POLAR_EVERY === 0) {
+      p.polar = (p.polar || 0) + 1;
+      this.log(`${po.name}：${p.name}に${po.stack}が付いた（${p.polar}つ、攻撃+${polarAtk(p)}${p.hiou === "night" ? `・受ける攻撃-${REIDO_CUT * p.polar}` : ""}）`, "buff", this.idx(p));
+    }
     if (p.lingerTurns) { this.afflict(this.opp(p), p, p.lingerAmt); p.lingerTurns--; }   // 蝕み：ターンの始めに毒（毒のダメージより先）
     p.numb = p.numbNext || 0; p.numbNext = 0;   // 痺れ・眠りは、受けた次の自分のターンだけ
     const drowsy = p.drowsyNext || 0; p.drowsyNext = 0; p.drowsy = drowsy;
@@ -818,7 +885,7 @@ class Game {
     if (p.wrath) p.wrathTurns = (p.wrathTurns || 0) + 1;
     if (p.poison) {
       this.dotHit(p, p.poison * this.poisonMult(p), "毒");
-      p.poison = Math.max(0, p.poison - (this.phase === "day" ? DAY_POISON_DECAY : 1));
+      p.poison = Math.max(0, p.poison - (this.phaseFor(p) === "day" ? DAY_POISON_DECAY : 1));
       if (this.over) return;
     }
     p.calm = false;   // 不動心は、このターンの毒を受けたところまで
@@ -879,6 +946,16 @@ class Game {
 /* ===== 敵AI（engine.py の SimpleAI と同じ考え方） ===== */
 const AI = {
   RESERVE: 6, LOW: 12,
+  /* 日蝕：捨てる3枚のほかに攻撃カードが2枚以上あるとき。月食：相手のHPとシールドが多いとき（engine.py の want_trio と同じ） */
+  trioPick(g, p) {
+    const cs = g.trioCards(p).filter(c => !c.hidden);
+    if (cs.length < TRIO) return null;
+    const drop = [...cs].sort((a, b) => (this.score(g, p, a) || 0) - (this.score(g, p, b) || 0)).slice(0, TRIO);
+    const o = g.opp(p);
+    if (p.hiou === "night") return o.hp + o.shield >= 25 ? drop.map(c => c.uid) : null;
+    const rest = p.hand.filter(c => !drop.includes(c) && c.type === "attack" && !c.hidden);
+    return (p.plays || 0) === 0 && rest.length >= 2 ? drop.map(c => c.uid) : null;
+  },
   reserved(p) {
     const keep = new Set();
     if (!hiouOptions(p).length) return keep;
@@ -917,7 +994,7 @@ const AI = {
       return p.calm || !danger ? null : 4.5 / Math.max(1, c.cost);
     }
     if (c.type === "linger") return o.lingerTurns ? null : 9 / Math.max(1, c.cost);
-    if (c.type === "sunshield") return p.shield <= 20 ? 3 * (g.phase === "night" ? 1.5 : 1) : null;
+    if (c.type === "sunshield") return p.shield <= 20 ? 3 * (g.phaseFor(p) === "night" ? 1.5 : 1) : null;
     if (c.type === "shieldbreak") { const n = Math.min(o.shield, c.power); return n >= 3 ? n / Math.max(1, c.cost) : null; }
     if (c.type === "nembutsu") return p.shield <= 22 ? 3 + charge(p, "buddha") : null;
     if (c.type === "gassho") return p.shield <= 20 ? 3 : null;
@@ -936,7 +1013,7 @@ const AI = {
     if (c.type === "convert") {   // 今の時間帯に合う属性へ、合わない攻撃カードがあれば変える
       const src = c.to === "day" ? "night" : "day";
       const n = p.hand.filter(x => x !== c && x.attr === src && ["attack", "summon", "poison"].includes(x.type)).length;
-      return g.phase === c.to && n >= 1 ? 3 : null;
+      return g.phaseFor(p) === c.to && n >= 1 ? 3 : null;
     }
     return null;
   },
@@ -955,6 +1032,9 @@ const AI = {
       }
       return best ? [best[1], "use"] : null;
     }
+    if (g.newmoonReady(p) && g.opp(p).hp > p.hp) return ["newmoon"];   // 新月：相手のHPの方が多ければ入れ替える
+    const trio = this.trioPick(g, p);
+    if (trio) return ["trio", trio];
     const pairs = g.pairOptions(p).filter(([d, n]) => p.hp + p.shield > d.cost + n.cost + 5 && !d.hidden && !n.hidden);
     if (pairs.length) {
       const [d, n] = pairs.reduce((a, b) => (b[0].cost + b[1].cost < a[0].cost + a[1].cost ? b : a));
@@ -1204,7 +1284,15 @@ function statusChips(p) {
   const good = [], bad = [];
   const tag = (list, name, desc, cls = "") => list.push(`<span class="st ${cls}"><b>${name}</b>${desc ? `<small>${desc}</small>` : ""}</span>`);
   if (p.wrath) tag(bad, "怒り状態", `受ける攻撃-${R.WRATH_REDUCE}・合掌と仏の怒りしか使えない・必殺技${finisherBase(p)}`, "wrath");
-  if (p.poison) tag(bad, `毒${p.poison}`, `ターン開始にHP-${Math.floor(p.poison * g.poisonMult(p) + 0.5)}${g.phase === "day" ? "（昼は半分・2ずつ減る）" : ""}`, "poison");
+  if (POLAR[p.hiou]) {
+    const po = POLAR[p.hiou];
+    tag(good, po.name, `自分の場はずっと${PHASE_JP[p.hiou]}（日没・夜明けも来ない）。自分のターン${POLAR_EVERY}回ごとに${po.stack}+1`);
+    if (p.polar) tag(good, `${po.stack}${p.polar}`, `攻撃+${polarAtk(p)}${p.hiou === "night" ? `・受ける攻撃-${REIDO_CUT * p.polar}` : ""}`);
+    if (p.kageuchi) tag(good, "影討ち", `このターン、使えるカード${KAGEUCHI_LIMIT}枚・与えるダメージ${KAGEUCHI_MULT}倍`);
+    if (p.hiou === "night" && !p.newmoonUsed && (p.ownTurns || 0) <= NEWMOON_TURN)
+      tag(good, (p.ownTurns || 0) === NEWMOON_TURN ? "新月が使える" : `新月まで${NEWMOON_TURN - (p.ownTurns || 0)}ターン`, "自分の12ターン目に1回だけ、相手とHPを入れ替えられる");
+  }
+  if (p.poison) tag(bad, `毒${p.poison}`, `ターン開始にHP-${Math.floor(p.poison * g.poisonMult(p) + 0.5)}${g.phaseFor(p) === "day" ? "（昼は半分・2ずつ減る）" : ""}`, "poison");
   if (p.bleed) tag(bad, `出血 残${p.bleed}`, `カードを使うたびHP-${Math.floor(R.BLEED_DMG * g.dotMult(p) + 0.5)}`, "bleed");
   if (p.recoverHalf) tag(bad, "回復半減", "月読：シールド回復が半分");
   if (p.numbNext) tag(bad, "痺れ", "次のターン、使えるカードが1枚減る");
@@ -1307,7 +1395,7 @@ function cardMain(p, c) {
   if (c.type === "attack") {
     const v = g.preview(p, c) - (c.poison || 0) * ((c.poison || 0) + 1) / 2;   // 毒牙の毒は数字に混ぜない
     const m = g.cardMult(c);
-    let extra = m > 1 ? `（${PHASE_JP[g.phase]}で${m}倍）` : "";
+    let extra = m > 1 ? `（${POLAR[p.hiou] ? POLAR[p.hiou].name : PHASE_JP[g.phase]}で${m}倍）` : "";
     if (c.drain) extra += "与ダメの半分HP回復";
     if (c.rage) extra += `減ったHP${BLOOD.RAGE_STEP}ごとに+1`;
     if (c.recoil) extra += `自分もHP-${c.recoil}`;
@@ -1337,7 +1425,7 @@ function cardMain(p, c) {
   if (c.type === "berserk") return `<big>+${debuffs(p)}</big>${c.turns}ターン、自分のデバフの数だけ攻撃+1（毒・出血はその量だけ）。ただし反撃などで返されるダメージは2倍`;
   if (c.type === "dohatsu") return `<big>-${c.power}</big>${c.turns}ターン、受けるダメージが減り、受けたダメージ2ごとに必殺技+1・HP+1。<b>怒り状態でも使える</b>`;
   if (c.type === "linger") return `<big>${c.turns}</big>ターンの間、相手のターンの始めに毒${c.power}`;
-  if (c.type === "sunshield") return `<big>+${c.power * (g.phase === "night" ? 2 : 1)}</big>シールド回復（夜は2倍）`;
+  if (c.type === "sunshield") return `<big>+${c.power * (g.phaseFor(p) === "night" ? 2 : 1)}</big>シールド回復（夜は2倍）`;
   if (c.type === "shieldbreak") return `<big>-${c.power}</big>相手のシールドを削る`;
   if (c.type === "nembutsu") return `<big>+${c.power + 2 * charge(p, "buddha")}</big>シールド回復（仏の怒りの溜め×2を足す）`;
   if (c.type === "guard") return `<big>-${c.power}</big>次の自分のターンまで、受ける攻撃が全部減る${c.wrathok ? "。<b>怒り状態でも使える</b>" : ""}`;
@@ -1351,7 +1439,7 @@ function cardMain(p, c) {
     return `<big>${p.hand.filter(x => x.attr === src).length}</big>枚の${ATTR_JP[src]}カードを${ATTR_JP[c.to]}属性に変えて1枚引く。<b>枚数に数えない</b>`;
   }
   if (c.type === "summon") {
-    const per = g.incoming(g.opp(p), g.outgoing(p, c.power, c.attr === g.phase ? R.ATTR_BONUS : 1));
+    const per = g.incoming(g.opp(p), g.outgoing(p, c.power, g.attrMult(c.attr, p)));
     return `<big class="${per > c.power ? "boost" : ""}">攻${per}</big>HP${c.hp}。場にコールし、ターン終了時に相手を攻撃。倒されるとドロップゾーンへ`;
   }
   const k = stackOf(p, c.id).length, next = k + 1;
@@ -1422,11 +1510,20 @@ function guideHTML(me) {
     return row(`<span class="turn-chip foe">${nameOf(1 - seat)}のターン</span><span class="act-hint">${mode === "ai" ? "行動中…" : "相手の操作を待っている"}</span>`);
   if (selectedCard()) return selGuideHTML(me);
   const lim = playLimit(me), left = Math.max(0, lim - (me.plays || 0));
-  const pips = `<span class="plays" title="このターンに使える残りの枚数（使う・回復・奥義）"><span class="pip-row">${"●".repeat(left)}${"○".repeat(lim - left)}</span><small>${left ? `あと${left}枚` : "使い切った"}${me.numb ? "（痺れ）" : ""}</small></span>`;
+  const pips = `<span class="plays" title="このターンに使える残りの枚数（使う・回復・奥義）"><span class="pip-row">${"●".repeat(left)}${"○".repeat(lim - left)}</span><small>${left ? `あと${left}枚` : "使い切った"}${me.numb ? "（痺れ）" : ""}${me.kageuchi ? "（影討ち）" : ""}</small></span>`;
   const pairs = g.pairOptions(me);
   const po = POLAR[me.hiou];
-  const pairHTML = pairs.length ? `<div class="pairs"><span class="act-hint"><b>${PHASE_JP[g.phase]}</b>：昼と夜の指定カードを同時に使うと${po ? `<b>${po.name}</b>（このあと${PHASE_ROUNDS}巡が${PHASE_JP[po.to]}になり、あなたの${PHASE_JP[po.to]}カードは${POLAR_MULT}倍）` : HIOU_NAME[me.hiou || "balanced"]}（枚数に数えない）</span>
-    ${pairs.map(([d, n]) => `<button class="btn small" data-act="pair" data-d="${d.uid}" data-n="${n.uid}">${d.name}＋${n.name}（シールド-${g.shieldCost(me, d) + g.shieldCost(me, n)}）</button>`).join("")}</div>` : "";
+  let polarHTML = "";
+  if (po) {   // 日蝕・月食（指定カード3枚を捨てる。捨てる3枚は、いま役に立たないものから自動で選ぶ）と新月
+    const cs = g.trioCards(me).filter(c => !c.hidden);
+    const drop = cs.length >= TRIO ? [...cs].sort((a, b) => (AI.score(g, me, a) || 0) - (AI.score(g, me, b) || 0)).slice(0, TRIO) : [];
+    const what = me.hiou === "day" ? `影討ち：このターン、使えるカード${KAGEUCHI_LIMIT}枚・与えるダメージ${KAGEUCHI_MULT}倍` : `相手のHPとシールドの${GESSHOKU_RATE * 100}%を奪う`;
+    const btns = [drop.length ? `<button class="btn small" data-act="trio" data-u="${drop.map(c => c.uid).join(",")}">${po.trio}（${drop.map(c => c.name).join("・")}を捨てる）</button>` : "",
+      g.newmoonReady(me) ? `<button class="btn small" data-act="newmoon">新月（HPを入れ替える：あなた${me.hp}⇄相手${g.opp(me).hp}）</button>` : ""].join("");
+    if (btns) polarHTML = `<div class="pairs"><span class="act-hint"><b>${po.name}</b>：${drop.length ? `${po.trio}＝${what}（枚数に数えない）` : ""}${g.newmoonReady(me) ? "　新月はこのターンだけ" : ""}</span>${btns}</div>`;
+  }
+  const pairHTML = polarHTML + (pairs.length ? `<div class="pairs"><span class="act-hint"><b>${PHASE_JP[g.phase]}</b>：昼と夜の指定カードを同時に使うと${HIOU_NAME[me.hiou || "balanced"]}（枚数に数えない）</span>
+    ${pairs.map(([d, n]) => `<button class="btn small" data-act="pair" data-d="${d.uid}" data-n="${n.uid}">${d.name}＋${n.name}（シールド-${g.shieldCost(me, d) + g.shieldCost(me, n)}）</button>`).join("")}</div>` : "");
   const note = me.wrath ? `<span class="act-hint">怒り状態：仏の怒りと「怒り状態でも使える」カードだけ使える</span>` : me.bleed ? `<span class="act-hint">出血中：使うたびHP-${R.BLEED_DMG}</span>` : "";
   return `${pairHTML}${row(`${pips}${note}<span class="grow"></span><button class="btn primary" data-act="end">ターン終了</button>`)}`;
 }
@@ -1447,7 +1544,8 @@ function render() {
     cell.classList.toggle("cur", i === idx);
     cell.classList.toggle("past", i < idx);
   });
-  $("phaseName").textContent = `第${g.round}巡　${g.override?.[g.round] ? (g.phase === "day" ? "白夜" : "極夜") : PHASE_JP[g.phase]}`;
+  const myPolar = POLAR[g.players[seat]?.hiou];
+  $("phaseName").textContent = `第${g.round}巡　${PHASE_JP[g.phase]}${myPolar ? `（あなたの場は${myPolar.name}）` : ""}`;
   const [k, nxt] = g.roundsToTransition();
   const esc = g.escalation();
   $("phaseInfo").textContent = (k === 0 ? "秘奥のチャンス・日蝕が2倍" : `次の${PHASE_JP[nxt]}まであと${k}巡${g.phase === "day" || g.phase === "night" ? `　${PHASE_JP[g.phase]}のカードが1.5倍` : ""}`)
@@ -1674,7 +1772,7 @@ function renderDeckEditor() {
     <div class="dk-summary">
       <b class="${probs.length ? "ng" : ""}">${size}枚</b>
       <span>昼${byAttr("day")}・夜${byAttr("night")}・無${byAttr("none")}・奥義${ougiCount}</span>
-      <span>${POLAR[deckType(def)] ? `秘奥のかわりに：<b class="dk-type">${POLAR[deckType(def)].name}</b>（${PHASE_JP[POLAR[deckType(def)].at]}に指定カードを同時に使うと、このあと${PHASE_ROUNDS}巡が${PHASE_JP[POLAR[deckType(def)].to]}になる）`
+      <span>${POLAR[deckType(def)] ? `秘奥のかわりに：<b class="dk-type">${POLAR[deckType(def)].name}</b>（自分の場がずっと${PHASE_JP[deckType(def)]}。${POLAR[deckType(def)].stack}が溜まり、指定カード3枚で${POLAR[deckType(def)].trio}${deckType(def) === "night" ? "。12ターン目に新月" : ""}）`
         : `秘奥：<b class="dk-type">${HIOU_NAME[deckType(def)]}</b>（${HIOU_SETS[deckType(def)].map(b => BUFFS[b][0]).join("・")}）`}</span>
       <span>指定カード　昼：${desName("day")}　夜：${desName("night")}</span>
     </div>
@@ -1714,7 +1812,7 @@ function deckEdit(act, b) {
     draft.designated ||= {};
     const list = draft.designated[attr] || [];
     if (list.includes(id)) draft.designated[attr] = list.filter(x => x !== id);
-    else draft.designated[attr] = [...list, id].slice(-DESIGNATED_PER_ATTR);
+    else draft.designated[attr] = [...list, id].slice(-desMax(POLAR[deckType(draft.cards)] ? deckType(draft.cards) : null, attr));
   }
   renderDeckEditor();
 }
@@ -1825,7 +1923,7 @@ async function runAITurn(id) {
     if (id !== gameId) return;
     const a = AI.pick(g, p);
     if (!a) break;
-    const ok = a[0] === "pair" ? g.playPair(p, a[1], a[2])
+    const ok = a[0] === "pair" ? g.playPair(p, a[1], a[2]) : a[0] === "trio" ? g.playTrio(p, a[1]) : a[0] === "newmoon" ? g.newMoon(p)
       : g.play(p, a[0], a[1], a[1] === "use" ? AI.chooseTarget(g, p, p.hand.find(c => c.uid === a[0])) : null);
     if (!ok) break;   // 使えないカードを選んだら、そのターンは終える（止まらないように）
     render();
@@ -1866,6 +1964,8 @@ function humanPlay(uid, m, target = null) {
   if (c?.hidden) { g.log(`裏向きのカードは${m === "use" ? "今は使えない" : "回復に回せない"}カードだった`, "warn"); render(); }   // 暗闇：使えないカードだったと分かる
 }
 function humanPair(d, n) { if (myTurnNow() && g.playPair(g.players[seat], d, n)) afterMyAction(); }
+function humanTrio(uids) { if (myTurnNow() && g.playTrio(g.players[seat], uids)) afterMyAction(); }
+function humanNewMoon() { if (myTurnNow() && g.newMoon(g.players[seat])) afterMyAction(); }
 async function endMyTurn() {
   if (!myTurnNow()) return;
   g.endTurn(g.players[seat]);
@@ -2210,6 +2310,8 @@ document.addEventListener("click", e => {
   else if (act === "aim") { if (sel) { sel.target = b.dataset.t ? +b.dataset.t : null; render(); } }
   else if (act === "drop") showDrop(+b.dataset.seat);
   else if (act === "pair") humanPair(+b.dataset.d, +b.dataset.n);
+  else if (act === "trio") humanTrio(b.dataset.u.split(",").map(Number));
+  else if (act === "newmoon") humanNewMoon();
   else if (act === "end") endMyTurn();
   else if (act === "close") hideDialog();
   else if (act === "deck") showDeckEditor();
