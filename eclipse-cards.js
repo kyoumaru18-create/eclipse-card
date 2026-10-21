@@ -20,7 +20,7 @@ const PHASE_JP = { day: "昼", dusk: "日没", night: "夜", dawn: "夜明け" }
 const ATTR_JP = { day: "昼", night: "夜", none: "無", both: "昼夜" };   // both：昼でも夜でも1.5倍
 const TYPE_JP = { attack: "攻撃", heal: "HP回復", poison: "毒", bleed: "出血", counter: "反撃", summon: "召喚", bloodshield: "血の盾", regen: "再生",
   parry: "見切り", karma: "因果応報", thorns: "棘", corrode: "腐食", bloom: "毒の開花", convert: "属性変化",
-  draw: "ドロー", sutra: "サーチ", gassho: "シールド", linger: "毒", calm: "守り", dohatsu: "守り", berserk: "強化", koromo: "守り", wait: "反撃", sunshield: "シールド", shieldbreak: "シールド破壊", nembutsu: "シールド", guard: "守り", buddha: "奥義", ougi: "奥義" };
+  draw: "ドロー", sutra: "サーチ", gassho: "シールド", linger: "毒", calm: "守り", dohatsu: "守り", berserk: "強化", koromo: "守り", wait: "反撃", dokumaku: "守り", mimic: "守り", sunshield: "シールド", shieldbreak: "シールド破壊", nembutsu: "シールド", guard: "守り", buddha: "奥義", ougi: "奥義" };
 const MONSTER_EXPECT = 3;   // モンスターが倒されるまでに攻撃する回数の目安（AIの見積もり用）
 const REVENGE_RATE = 0.5;   // 報復：前の相手ターンに受けたダメージのこの割合を上乗せ
 const BLOOD = { SHURA_HEAL: 10, SHURA_MULT: 1.25, RAGE_STEP: 4 };   // 自傷デッキ用（修羅の回復量・倍率、狂血の増え方）
@@ -162,6 +162,8 @@ const CARDS = {
   zazen:    { name: "座禅",     attr: "day",   type: "heal",    power: 4, cure: true, wrathok: true, cost: 0, recover: 2 },
   fudoushin:{ name: "不動心",   attr: "night", type: "calm",    wrathok: true, cost: 2, recover: 3 },
   mahi:     { name: "麻痺毒",   attr: "night", type: "attack",  power: 3, paralyze: 1, cost: 3, recover: 3 },
+  dokumaku: { name: "毒の膜",   attr: "day",   type: "dokumaku", power: 5, poison: 2, cost: 1, recover: 3 },
+  mimic:    { name: "擬態",     attr: "night", type: "mimic",   poison: 3, cost: 2, recover: 3 },
   dokugiri: { name: "毒霧",     attr: "day",   type: "poison",  power: 4, cost: 2, recover: 3 },
   koromo:   { name: "毒の衣",   attr: "night", type: "koromo",  power: 3, cut: 5, turns: 3, cost: 1, recover: 3 },
   machi:    { name: "待ちの構え", attr: "day", type: "wait",    cost: 2, recover: 3 },
@@ -186,7 +188,7 @@ const PRESETS = {
   moon: { name: "夜特化", cards: {
     slash: 3, ambush: 3, nightowl: 3, drain: 3, moonturn: 2, twilight: 3, oborozuki: 3, shingetsu: 3, bleed: 3, gassho: 1, needle: 2, firstaid: 3, tsukuyomi: 4 } },
   venom: { name: "状態異常", cards: {
-    needle: 3, bleed: 3, drain: 2, mahi: 3, fang: 3, metsubushi: 2, bloom: 2, mushibami: 3, dokugumo: 2, dokugiri: 2, koromo: 2, firstaid: 3, heal: 2, kodoku: 4 } },
+    needle: 3, bleed: 3, drain: 2, mahi: 3, fang: 3, metsubushi: 2, mushibami: 3, dokugumo: 2, dokumaku: 2, mimic: 2, dokugiri: 2, koromo: 2, firstaid: 3, kodoku: 4 } },
   counter: { name: "カウンター", cards: {
     counter: 3, parry: 3, revenge: 3, thorns: 2, kyoka: 4, karma: 3, strike: 2, slash: 2, monban: 2, kamaenaoshi: 2, machi: 2, drain: 2, heal: 3, firstaid: 3 } },
   buddha: { name: "仏の怒り", cards: {
@@ -437,6 +439,12 @@ class Game {
   }
   /* 受け手側の補正（防御強化・怒り状態）を計算済みのダメージを当てる */
   hit(t, amt, src, attacker = null) {
+    if (attacker && t.mimic && amt > 0) {   // 擬態：攻撃を0にして、相手に毒
+      const n = t.mimic; t.mimic = 0;
+      this.log(`${t.name}の擬態：${src}を0にした`, "counter", this.idx(t));
+      this.afflict(t, attacker, n);
+      return 0;
+    }
     if (attacker && t.meikyo && amt > 0) {   // 明鏡止水：攻撃を0にして、そのまま返す
       this.log(`${t.name}の明鏡止水：${src}を0にして返した`, "counter", this.idx(t));
       this.dealDamage(attacker, amt, "明鏡止水");
@@ -495,6 +503,7 @@ class Game {
   /* 棘の鎧：攻撃を受けるたびに相手へダメージ（返したダメージには棘は反応しない） */
   thornsHit(t, attacker) {
     if (t.thornsTurns && !this.over) this.dealDamage(attacker, t.thorns * this.escalation(), "棘の鎧");
+    if (t.dokumaku && !this.over) this.afflict(t, attacker, t.dokumaku);   // 毒の膜
     for (const m of [...t.monsters]) if (m.mthorn && !this.over) this.dealDamage(attacker, m.mthorn * this.escalation(), "門番");
   }
   /* 毒・出血を付ける */
@@ -676,6 +685,13 @@ class Game {
     } else if (c.type === "calm") {
       p.calm = true;
       this.log(`${p.name}は不動心（次の自分のターンまで、毒・出血などの特殊ダメージが半分）`);
+    } else if (c.type === "dokumaku") {
+      const b = p.shield;
+      p.shield = Math.min(R.SHIELD_CAP, p.shield + c.power); p.dokumaku = c.poison;
+      this.log(`${p.name}は毒の膜を張った（シールド ${b}→${p.shield}。次の自分のターンまで、攻撃してきた相手に毒${c.poison}）`, "shield", this.idx(p), p.shield - b);
+    } else if (c.type === "mimic") {
+      p.mimic = c.poison;
+      this.log(`${p.name}は擬態した（次に受ける攻撃を0にして、相手に毒${c.poison}）`, "buff", this.idx(p));
     } else if (c.type === "koromo") {   // 毒の衣：自分に毒、そのかわり受ける攻撃が減る
       this.afflict(p, p, c.power);
       p.koromoTurns = c.turns; p.koromoCut = c.cut;
@@ -969,6 +985,7 @@ class Game {
     this.log(`第${this.round}巡【${PHASE_JP[this.phase]}】${p.name}のターン`, "turn");
     p.usedTurn = 0; p.hpPaidTurn = 0;
     p.kageuchi = false; p.meikyo = false;
+    p.dokumaku = 0; p.mimic = 0;   // 毒の膜・擬態は次の自分のターンまで
     for (const m of p.monsters) m.acted = false;   // モンスターは自分のターンごとに1回攻撃できる
     const nk = NEW_OUGI.NEHAN_CHARGE * charge(p, "nehan");
     if (nk && p.hp < R.MAX_HP) { p.hp = Math.min(R.MAX_HP, p.hp + nk); this.log(`涅槃：${p.name}はHP+${nk}`, "heal", this.idx(p), nk); }   // 涅槃を溜めている間
@@ -1149,6 +1166,8 @@ const AI = {
       return p.deck.some(x => x.id === "buddha") && have < R.OUGI_AT ? 3 : null;
     }
     if (c.type === "dohatsu") return p.dohatsuTurns ? null : 5 / Math.max(1, c.cost);
+    if (c.type === "dokumaku") return p.dokumaku ? null : (p.shield <= 20 || o.monsters.length ? 4 : 2.5) / Math.max(1, c.cost);   // engine.py と同じ
+    if (c.type === "mimic") return p.mimic || p.parry ? null : 5 / Math.max(1, c.cost);
     if (c.type === "koromo") return p.koromoTurns || p.hp <= 15 ? null : 4 / Math.max(1, c.cost);   // HPに余裕があって、まだまとっていないとき
     if (c.type === "wait") return p.waiting || p.hand.length < 4 ? null : 4 / Math.max(1, c.cost);   // 手札が多くて、まだ待っていないとき
     if (c.type === "berserk") {   // デバフが多いほど、手札の攻撃が強くなる（engine.py と同じ）
@@ -1471,6 +1490,8 @@ function statusChips(p) {
   if (p.numb && p === g.active) tag(bad, "痺れ中", "このターン使えるカードが1枚減っている");
   if (p.drowsyNext) tag(bad, "眠り", "次のターン、引く枚数が1枚減る");
   if (p.calm) tag(good, "不動心", "特殊ダメージが半分");
+  if (p.dokumaku) tag(good, "毒の膜", `攻撃してきた相手に毒${p.dokumaku}`);
+  if (p.mimic) tag(good, "擬態", `次に受ける攻撃を0にして、相手に毒${p.mimic}`);
   if (p.koromoTurns) tag(good, `毒の衣 残${p.koromoTurns}`, `受ける攻撃-${p.koromoCut}`);
   if (p.waiting) tag(good, "待ちの構え", `ドローできない・次に受けたダメージを${WAIT_MULT}倍で返す`);
   if (p.berserkTurns) tag(good, `狂乱 残${p.berserkTurns}`, `攻撃+${debuffs(p)}（デバフの数）・返されるダメージ2倍`);
@@ -1601,6 +1622,8 @@ function cardMain(p, c) {
   if (c.type === "sutra") return `<big>仏</big>デッキから仏の怒りを1枚手札へ（残り${p.deck.filter(x => x.id === "buddha").length}枚）`;
   if (c.type === "gassho") return `<big>+${c.power}</big>シールド回復。<b>怒り状態でも使える</b>`;
   if (c.type === "calm") return `<big>½</big>次の自分のターンまで、毒・出血などの特殊ダメージが半分。<b>怒り状態でも使える</b>`;
+  if (c.type === "dokumaku") return `<big>+${c.power}</big>シールド回復。次の自分のターンまで、攻撃してきた相手に毒${c.poison}（モンスターの攻撃でも）`;
+  if (c.type === "mimic") return `<big>0</big>次に受ける攻撃を0にして、攻撃してきた相手に毒${c.poison}`;
   if (c.type === "koromo") return `<big>-${c.cut}</big>自分に毒${c.power}。${c.turns}ターン、受ける攻撃-${c.cut}`;
   if (c.type === "wait") return `<big>×${WAIT_MULT}</big>ダメージを受けるまでドローできない。次に受けたダメージを${WAIT_MULT}倍で返す`;
   if (c.type === "berserk") return `<big>+${debuffs(p)}</big>${c.turns}ターン、自分のデバフの数だけ攻撃+1（毒・出血はその量だけ）。ただし反撃などで返されるダメージは2倍`;
@@ -1897,6 +1920,8 @@ function cardBrief(c, id = c.id) {   // カード一覧（CARDS）の中身に�
     case "sutra": return "デッキから仏の怒りを1枚手札に加える";
     case "gassho": return `シールド+${c.power}。怒り状態でも使える`;
     case "calm": return "次の自分のターンまで、特殊ダメージが半分。怒り状態でも使える";
+    case "dokumaku": return `シールド+${c.power}。次の自分のターンまで、攻撃してきた相手に毒${c.poison}`;
+    case "mimic": return `次に受ける攻撃を0にして、攻撃してきた相手に毒${c.poison}`;
     case "koromo": return `自分に毒${c.power}。${c.turns}ターン、受ける攻撃-${c.cut}`;
     case "wait": return `ダメージを受けるまでドローできない。次に受けたダメージを${WAIT_MULT}倍で返す`;
     case "berserk": return `${c.turns}ターン、自分のデバフの数だけ攻撃+1（毒・出血はその量だけ）。返されるダメージは2倍`;
