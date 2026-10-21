@@ -146,9 +146,9 @@ const CARDS = {
 /* 見本デッキ（cards.json の decks と同じ） */
 const PRESETS = {
   sun: { name: "昼特化", cards: {
-    strike: 3, bomb: 3, sunwolf: 3, eclipse: 2, jab: 1, sunturn: 2, twilight: 2, zanshou: 3, nichirin: 2, drain: 2, needle: 2, counter: 2, heal: 3, firstaid: 2, amaterasu: 4 } },
+    strike: 3, bomb: 3, sunwolf: 3, eclipse: 2, jab: 3, sunturn: 2, twilight: 2, zanshou: 3, nichirin: 3, regen: 3, heal: 3, firstaid: 2, amaterasu: 4 } },
   moon: { name: "夜特化", cards: {
-    slash: 3, ambush: 3, nightowl: 3, drain: 3, eclipse: 2, moonturn: 2, twilight: 3, oborozuki: 2, shingetsu: 2, bleed: 2, counter: 2, heal: 3, firstaid: 2, tsukuyomi: 4 } },
+    slash: 3, ambush: 3, nightowl: 3, drain: 3, eclipse: 2, moonturn: 2, twilight: 3, oborozuki: 3, shingetsu: 3, bleed: 3, gassho: 1, firstaid: 3, tsukuyomi: 4 } },
   venom: { name: "状態異常", cards: {
     needle: 3, bleed: 3, drain: 3, fang: 3, metsubushi: 2, corrode: 1, bloom: 2, ambush: 1, mushibami: 3, recoil: 2, eclipse: 2, counter: 2, firstaid: 3, heal: 2, kodoku: 4 } },
   counter: { name: "カウンター", cards: {
@@ -755,9 +755,20 @@ class Game {
   pairOptions(p) {
     if (!this.buffReady(p) || p.wrath) return [];
     const pick = attr => [...new Map(p.hand.filter(c => p.designated[attr].includes(c.id)).map(c => [c.id, c])).values()];
+    const ok = c => this.canPlay(p, c, "use", false);
     const out = [];
+    const one = ["day", "night"].find(k => !p.designated[k].length);
+    if (one) {   // 昼（夜）のカードしかないデッキは、残りの指定カード2枚で発動する（engine.py と同じ）
+      const cs = p.hand.filter(c => p.designated[one === "day" ? "night" : "day"].includes(c.id) && ok(c));
+      const seen = new Set();
+      cs.forEach((a, i) => cs.slice(i + 1).forEach(b => {
+        const key = [a.id, b.id].sort().join();
+        if (!seen.has(key)) { seen.add(key); out.push([a, b]); }
+      }));
+      return out;
+    }
     for (const d of pick("day")) for (const n of pick("night"))
-      if (this.canPlay(p, d, "use", false) && this.canPlay(p, n, "use", false)) out.push([d, n]);
+      if (ok(d) && ok(n)) out.push([d, n]);
     return out;
   }
   playPair(p, dUid, nUid) {
@@ -874,6 +885,11 @@ const AI = {
     for (const key of ["day", "night"]) {
       const c = p.hand.find(c => p.designated[key].includes(c.id));
       if (c) keep.add(c.uid);
+    }
+    const one = ["day", "night"].find(k => !p.designated[k].length);
+    if (one) {   // 片方の属性しかないデッキは、指定カードを2枚温存
+      keep.clear();
+      for (const c of p.hand.filter(c => p.designated[one === "day" ? "night" : "day"].includes(c.id)).slice(0, 2)) keep.add(c.uid);
     }
     return keep;
   },
@@ -1509,7 +1525,7 @@ function showHowTo() {
   const names = ids => ids.map(id => `<b>${CARDS[id].name}</b>`).join("・");
   const me = g?.players[seat];
   showDialog(`<h2>遊び方</h2>${howToHTML()}
-    ${me ? `<p>この試合の指定カード　昼：${names(me.designated.day)}　夜：${names(me.designated.night)}</p>
+    ${me ? `<p>この試合の指定カード　昼：${names(me.designated.day) || "なし"}　夜：${names(me.designated.night) || "なし"}${!me.designated.day.length || !me.designated.night.length ? "（片方しかないので、指定カード2枚で発動）" : ""}</p>
       <p>あなたのデッキの秘奥：<b>${HIOU_NAME[me.hiou || "balanced"]}</b>（${HIOU_SETS[me.hiou || "balanced"].map(b => BUFFS[b][0]).join("・")}）</p>` : ""}
     <button class="btn" data-act="close">閉じる</button>`, "howto");
 }
