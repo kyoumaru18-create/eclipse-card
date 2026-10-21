@@ -159,6 +159,7 @@ const CARDS = {
   kongo:    { name: "金剛",     attr: "day",   type: "guard",   power: 4, wrathok: true, cost: 2, recover: 3 },
   zazen:    { name: "座禅",     attr: "day",   type: "heal",    power: 4, cure: true, wrathok: true, cost: 0, recover: 2 },
   fudoushin:{ name: "不動心",   attr: "night", type: "calm",    wrathok: true, cost: 2, recover: 3 },
+  mahi:     { name: "麻痺毒",   attr: "night", type: "attack",  power: 3, paralyze: 1, cost: 3, recover: 3 },
   dokugiri: { name: "毒霧",     attr: "day",   type: "poison",  power: 4, cost: 2, recover: 3 },
   koromo:   { name: "毒の衣",   attr: "night", type: "koromo",  power: 3, cut: 5, turns: 3, cost: 1, recover: 3 },
   machi:    { name: "待ちの構え", attr: "day", type: "wait",    cost: 2, recover: 3 },
@@ -183,7 +184,7 @@ const PRESETS = {
   moon: { name: "夜特化", cards: {
     slash: 3, ambush: 3, nightowl: 3, drain: 3, moonturn: 2, twilight: 3, oborozuki: 3, shingetsu: 3, bleed: 3, gassho: 1, needle: 2, firstaid: 3, tsukuyomi: 4 } },
   venom: { name: "状態異常", cards: {
-    needle: 3, bleed: 3, drain: 3, fang: 3, metsubushi: 2, corrode: 1, bloom: 2, mushibami: 3, dokugumo: 2, dokugiri: 2, koromo: 2, counter: 1, firstaid: 3, heal: 2, kodoku: 4 } },
+    needle: 3, bleed: 3, drain: 2, mahi: 3, fang: 3, metsubushi: 2, bloom: 2, mushibami: 3, dokugumo: 2, dokugiri: 2, koromo: 2, firstaid: 3, heal: 2, kodoku: 4 } },
   counter: { name: "カウンター", cards: {
     counter: 3, parry: 3, revenge: 3, thorns: 2, kyoka: 4, karma: 3, strike: 2, slash: 2, monban: 2, kamaenaoshi: 2, machi: 2, drain: 2, heal: 3, firstaid: 3 } },
   buddha: { name: "仏の怒り", cards: {
@@ -296,7 +297,7 @@ const BERSERK_REFLECT = 2, REFLECT_SOURCES = ["反撃", "鏡花水月", "水月"
 const WAIT_MULT = 2.5;   // 待ちの構え：次に受けたダメージをこの倍率で返す
 const DOHATSU_PER = 2;   // 怒髪天：受けたダメージこの量ごとに、必殺技+1・HP+1
 /* 自分についているデバフの数。毒は毒の量、出血は残りターン、ほか（眠り・痺れ・暗闇・蝕み）は1つ1（engine.py の debuffs と同じ） */
-function debuffs(p) { return (p.poison || 0) + (p.bleed || 0) + [p.drowsy, p.numb, p.blind, p.lingerTurns].filter(Boolean).length; }
+function debuffs(p) { return (p.poison || 0) + (p.bleed || 0) + [p.drowsy, p.numb, p.blind, p.lingerTurns, p.paralyzed].filter(Boolean).length; }
 function finisherBase(p) { return R.FINISH_DMG + R.WAIT_BONUS * (p.wrathTurns || 0) + Math.floor((p.anger || 0) / DOHATSU_PER); }
 
 /* ===== 戦闘エンジン（engine.py の移植）
@@ -614,6 +615,7 @@ class Game {
     if (c.sleep && !o.drowsyNext) { o.drowsyNext = 1; this.log(`${o.name}は眠くなった（次のターン、引く枚数が1枚減る）`); }
     if (c.blind) { o.blind = Math.max(o.blind || 0, c.blind); this.log(`${o.name}は暗闇になった（${o.blind}ターンの間、引いたカードが裏向きになる）`, "", this.idx(o)); }
     if (c.numbing && !o.numbNext) { o.numbNext = 1; this.log(`${o.name}は痺れた（次のターン、使えるカードが1枚減る）`); }
+    if (c.paralyze && !o.paralyzeNext) { o.paralyzeNext = 1; this.log(`${o.name}は麻痺した（次のターン、ドローできない）`, "", this.idx(o)); }
   }
   resolveUse(p, c) {
     if (c.type !== "summon") p.drop.push(c);   // モンスターのカードは場に残り、破壊されたらドロップゾーンへ
@@ -977,6 +979,7 @@ class Game {
     }
     if (p.lingerTurns) { this.afflict(this.opp(p), p, p.lingerAmt); p.lingerTurns--; }   // 蝕み：ターンの始めに毒（毒のダメージより先）
     p.numb = p.numbNext || 0; p.numbNext = 0;   // 痺れ・眠りは、受けた次の自分のターンだけ
+    p.paralyzed = p.paralyzeNext || 0; p.paralyzeNext = 0;   // 麻痺も同じ
     const drowsy = p.drowsyNext || 0; p.drowsyNext = 0; p.drowsy = drowsy;
     p.counter = false;
     p.parry = false;
@@ -1016,6 +1019,7 @@ class Game {
     if (!p.blind) for (const c of p.hand) delete c.hidden;   // 暗闇が解けたら、裏向きのカードを表に戻す
     const before = p.hand.length;
     if (p.waiting) this.log(`${p.name}は待ちの構えで引けない`);
+    else if (p.paralyzed) this.log(`${p.name}は麻痺していて引けない`);
     else if (this.round === 1 && this.turnIdx === this.firstIdx) this.draw(p, R.FIRST_DRAW);
     else {
       if (drowsy) this.log(`${p.name}は眠り（引く枚数-${drowsy}）`);
@@ -1085,7 +1089,8 @@ const AI = {
     if (c.hpcost && p.hp <= c.hpcost + 12) return null;   // HPを払うカードは、HPに余裕があるときだけ
     if (c.type === "bloodshield") return p.shield <= 12 ? 3 : null;
     if (c.type === "regen") return !p.regenTurns && p.hp <= R.MAX_HP - 6 ? 2.5 : null;
-    if (["attack", "poison", "summon"].includes(c.type)) return g.preview(p, c) / Math.max(1, c.cost + 0.7 * (c.hpcost || 0));
+    if (["attack", "poison", "summon"].includes(c.type))   // 麻痺：相手が1ターン引けない分を足す（engine.py と同じ）
+      return g.preview(p, c) / Math.max(1, c.cost + 0.7 * (c.hpcost || 0)) + (c.paralyze && !o.paralyzeNext ? 2 : 0);
     if (c.type === "bleed") return o.bleed ? null : 4 / c.cost;
     if (c.type === "counter") return p.counter ? null : 3.5 / c.cost;
     if (c.type === "draw") return p.hand.length <= 5 ? 3 : null;   // 血の契約：手札が少ないとき
@@ -1407,6 +1412,7 @@ function statusChips(p) {
   if (p.bleed) tag(bad, `出血 残${p.bleed}`, `カードを使うたびHP-${Math.floor(R.BLEED_DMG * g.dotMult(p) + 0.5)}`, "bleed");
   if (p.recoverHalf) tag(bad, "回復半減", "月読：シールド回復が半分");
   if (p.numbNext) tag(bad, "痺れ", "次のターン、使えるカードが1枚減る");
+  if (p.paralyzeNext) tag(bad, "麻痺", "次のターン、ドローできない");
   if (p.numb && p === g.active) tag(bad, "痺れ中", "このターン使えるカードが1枚減っている");
   if (p.drowsyNext) tag(bad, "眠り", "次のターン、引く枚数が1枚減る");
   if (p.calm) tag(good, "不動心", "特殊ダメージが半分");
@@ -1516,6 +1522,7 @@ function cardMain(p, c) {
     if (c.revenge) extra += `前の相手ターンに受けたダメージ（${p.revengeBase || 0}）の半分を上乗せ`;
     if (c.poison) extra += `＋毒${c.poison}`;
     if (c.numbing) extra += "＋相手を痺れさせる";
+    if (c.paralyze) extra += "＋相手を麻痺させる（次のターン、ドローできない）";
     if (c.allday && m === 1) extra += "昼でも夜でも1.5倍";
     if (c.zeal) extra += "＋仏の怒りの溜め×2";
     if (c.fury) extra += `（このターン使った${p.usedTurn || 0}枚・払ったHP${p.hpPaidTurn || 0}で上がる）`;
@@ -1816,7 +1823,7 @@ async function saveDeck(deck) {
 /* デッキ編集画面に出すカードの説明（試合中でなくても出せる固定の文） */
 function cardBrief(c, id = c.id) {   // カード一覧（CARDS）の中身には id が入っていないので、呼ぶ側から渡す
   switch (c.type) {
-    case "attack": return `${c.power}ダメージ${c.drain ? "・与ダメの半分HP回復" : ""}${c.recoil ? `・自分もHP-${c.recoil}` : ""}${c.eclipse ? "・日没と夜明けは2倍" : ""}${c.rage ? `・減ったHP${BLOOD.RAGE_STEP}ごとに+1` : ""}${c.hpcost ? `・HPを${c.hpcost}払う` : ""}${c.revenge ? "・前の相手ターンに受けたダメージの半分を上乗せ" : ""}${c.poison ? `・毒${c.poison}` : ""}${c.numbing ? "・相手の次のターン、使えるカード-1" : ""}${c.blind ? `・相手を${c.blind}ターン暗闇（引いたカードが裏向き）` : ""}${c.allday ? "・昼でも夜でも1.5倍" : ""}${c.zeal ? "・仏の怒りの溜め×2を足す" : ""}${c.fury ? "・このターン使ったカード1枚ごとに+2、払ったHP3ごとに+1" : ""}${c.attr === "both" ? "・昼でも夜でも1.5倍" : ""}${c.splash ? "・与えた分シールド回復" : ""}${c.frenzy ? "・HPが半分以下なら2倍" : ""}`;
+    case "attack": return `${c.power}ダメージ${c.drain ? "・与ダメの半分HP回復" : ""}${c.recoil ? `・自分もHP-${c.recoil}` : ""}${c.eclipse ? "・日没と夜明けは2倍" : ""}${c.rage ? `・減ったHP${BLOOD.RAGE_STEP}ごとに+1` : ""}${c.hpcost ? `・HPを${c.hpcost}払う` : ""}${c.revenge ? "・前の相手ターンに受けたダメージの半分を上乗せ" : ""}${c.poison ? `・毒${c.poison}` : ""}${c.numbing ? "・相手の次のターン、使えるカード-1" : ""}${c.paralyze ? "・相手の次のターン、ドローできない" : ""}${c.blind ? `・相手を${c.blind}ターン暗闇（引いたカードが裏向き）` : ""}${c.allday ? "・昼でも夜でも1.5倍" : ""}${c.zeal ? "・仏の怒りの溜め×2を足す" : ""}${c.fury ? "・このターン使ったカード1枚ごとに+2、払ったHP3ごとに+1" : ""}${c.attr === "both" ? "・昼でも夜でも1.5倍" : ""}${c.splash ? "・与えた分シールド回復" : ""}${c.frenzy ? "・HPが半分以下なら2倍" : ""}`;
     case "draw": return `HPを${c.hpcost}払って${c.power}枚引く`;
     case "sutra": return "デッキから仏の怒りを1枚手札に加える";
     case "gassho": return `シールド+${c.power}。怒り状態でも使える`;
