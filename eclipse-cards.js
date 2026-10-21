@@ -76,6 +76,7 @@ const HIOU_SETS = {
          自分の12ターン目に1回だけ、新月（相手とHPを入れ替える）を使える */
 const POLAR = { day: { name: "白夜", stack: "陽光", trio: "日蝕" }, night: { name: "極夜", stack: "零度", trio: "月食" } };
 const POLAR_EVERY = 3, YOUKOU_DMG = 1, REIDO_DMG = 1, REIDO_CUT = 1, TRIO = 3;
+const BYAKUYA_POISON_FREE = 3;   // 白夜の人は、毒の昼の効果（半分・2ずつ減る）を受けないかわりに、毒が3以下ならダメージを受けない
 const KAGEUCHI_LIMIT = 3, KAGEUCHI_MULT = 2, GESSHOKU_RATE = 0.2, NEWMOON_TURN = 12;
 function polarAtk(p) { return p.polar ? (p.hiou === "day" ? YOUKOU_DMG : REIDO_DMG) * p.polar : 0; }
 const HIOU_NAME = { day: "白夜", night: "極夜", balanced: "蝕の秘奥", venom: "毒の秘奥", counter: "鏡の秘奥", blood: "血の秘奥" };
@@ -337,7 +338,9 @@ class Game {
     return attr === ph || (p && p.blessing.includes(attr)) ? R.ATTR_BONUS : 1; }
   /* 毒・出血のダメージ倍率（日蝕の深まり×相手の蠱毒） */
   dotMult(victim) { return this.escalation() * (this.opp(victim).kodoku ? R.KODOKU_MULT : 1); }
-  poisonMult(victim) { const ph = this.phaseFor(victim); return this.dotMult(victim) * (ph === "day" ? DAY_POISON_CUT : ph === "night" ? NIGHT_POISON_MULT : 1); }
+  poisonMult(victim) {
+    if (victim.hiou === "day") return victim.poison <= BYAKUYA_POISON_FREE ? 0 : this.dotMult(victim);   // 白夜
+    const ph = this.phaseFor(victim); return this.dotMult(victim) * (ph === "day" ? DAY_POISON_CUT : ph === "night" ? NIGHT_POISON_MULT : 1); }
   /* 日蝕の深まり。昼夜が1周するごとにダメージ倍率が上がる */
   escalation() { return 1 + R.ESCALATION * Math.floor((this.round - 1) / CYCLE.length); }
   outgoing(p, base, mult) {
@@ -884,8 +887,9 @@ class Game {
     p.plays = 0;
     if (p.wrath) p.wrathTurns = (p.wrathTurns || 0) + 1;
     if (p.poison) {
+      if (p.hiou === "day" && p.poison <= BYAKUYA_POISON_FREE) this.log(`白夜：${p.name}は毒${p.poison}を受けない（${BYAKUYA_POISON_FREE}以下）`);
       this.dotHit(p, p.poison * this.poisonMult(p), "毒");
-      p.poison = Math.max(0, p.poison - (this.phaseFor(p) === "day" ? DAY_POISON_DECAY : 1));
+      p.poison = Math.max(0, p.poison - (this.phaseFor(p) === "day" && p.hiou !== "day" ? DAY_POISON_DECAY : 1));   // 白夜は2ずつ減らない
       if (this.over) return;
     }
     p.calm = false;   // 不動心は、このターンの毒を受けたところまで
@@ -1292,7 +1296,7 @@ function statusChips(p) {
     if (p.hiou === "night" && !p.newmoonUsed && (p.ownTurns || 0) <= NEWMOON_TURN)
       tag(good, (p.ownTurns || 0) === NEWMOON_TURN ? "新月が使える" : `新月まで${NEWMOON_TURN - (p.ownTurns || 0)}ターン`, "自分の12ターン目に1回だけ、相手とHPを入れ替えられる");
   }
-  if (p.poison) tag(bad, `毒${p.poison}`, `ターン開始にHP-${Math.floor(p.poison * g.poisonMult(p) + 0.5)}${g.phaseFor(p) === "day" ? "（昼は半分・2ずつ減る）" : ""}`, "poison");
+  if (p.poison) tag(bad, `毒${p.poison}`, `ターン開始にHP-${Math.floor(p.poison * g.poisonMult(p) + 0.5)}${p.hiou === "day" ? `（白夜：毒${BYAKUYA_POISON_FREE}以下は効かない）` : g.phaseFor(p) === "day" ? "（昼は半分・2ずつ減る）" : ""}`, "poison");
   if (p.bleed) tag(bad, `出血 残${p.bleed}`, `カードを使うたびHP-${Math.floor(R.BLEED_DMG * g.dotMult(p) + 0.5)}`, "bleed");
   if (p.recoverHalf) tag(bad, "回復半減", "月読：シールド回復が半分");
   if (p.numbNext) tag(bad, "痺れ", "次のターン、使えるカードが1枚減る");
