@@ -1490,7 +1490,7 @@ function renderLog() {
 /* 状態は「良い効果」「悪い効果」に分け、効果の中身まで書く */
 function statusChips(p) {
   const good = [], bad = [];
-  const tag = (list, name, desc, cls = "") => list.push(`<span class="st ${cls}"><b>${name}</b>${desc ? `<small>${desc}</small>` : ""}</span>`);
+  const tag = (list, name, desc, cls = "") => list.push(`<button type="button" class="st tip ${list === bad ? "neg" : "pos"} ${cls}" data-tip="${name}"><b>${name}</b>${desc ? `<small>${desc}</small>` : ""}</button>`);
   if (p.wrath) tag(bad, "怒り状態", `受ける攻撃-${R.WRATH_REDUCE}・合掌と仏の怒りしか使えない・必殺技${finisherBase(p)}`, "wrath");
   if (POLAR[p.hiou]) {
     const po = POLAR[p.hiou];
@@ -1600,14 +1600,19 @@ function renderSide(key, p, pv = null, mons = null) {
   const stacks = Object.entries(p.stacks).filter(([, s]) => s.length);
   if (stacks.length) {
     rows.push(`<div class="st-row"><span class="st-head">溜め</span><div class="stacks">${stacks.map(([id, s]) =>
-      `<div class="stack"><b>${OUGI[id].name}</b><span class="pips gold">${"●".repeat(s.length)}${"○".repeat(R.OUGI_AT - s.length)}</span>
-        <small>${OUGI[id].charge(s.length)}${s.length === R.OUGI_AT - 1 ? "・次で必殺技" : ""}</small></div>`).join("")}</div></div>`);
+      `<button type="button" class="stack tip" data-tip="溜め${id}"><b>${OUGI[id].name}<span class="pips gold">${"●".repeat(s.length)}${"○".repeat(R.OUGI_AT - s.length)}</span></b>
+        <small>${OUGI[id].charge(s.length)}${s.length === R.OUGI_AT - 1 ? "・次で必殺技" : ""}</small></button>`).join("")}</div></div>`);
   }
   const { good, bad } = statusChips(p);
   if (bad.length) rows.push(`<div class="st-row"><span class="st-head bad">悪い</span><div class="sts">${bad.join("")}</div></div>`);
   if (good.length) rows.push(`<div class="st-row"><span class="st-head good">良い</span><div class="sts">${good.join("")}</div></div>`);
   $(`${key}-status`).innerHTML = rows.join("");
+  if (key === "me") $("dock-status").innerHTML = rows.join("");   // 自分の状態は手札の帯にも出す（場の側は隠す）
+  for (const t of document.querySelectorAll(`#${key}-status [data-tip]${key === "me" ? ", #dock-status [data-tip]" : ""}`))
+    t.classList.toggle("open", openTips.has(`${key}:${t.dataset.tip}`));
 }
+/* タッチして開いている状態のチップ（描き直しても開いたまま） */
+const openTips = new Set();
 
 function cardMain(p, c) {
   if (c.type === "attack") {
@@ -2537,6 +2542,13 @@ function choose(uid, m) {
   render();
 }
 document.addEventListener("click", e => {
+  const tipEl = e.target.closest("[data-tip]");   // 状態のチップ：タッチで効果を開く／閉じる
+  if (tipEl) {
+    const side = tipEl.closest(".side")?.id === "side-enemy" ? "enemy" : "me", k = `${side}:${tipEl.dataset.tip}`;
+    if (openTips.has(k)) openTips.delete(k); else openTips.add(k);
+    tipEl.classList.toggle("open", openTips.has(k));
+    return;
+  }
   const b = e.target.closest("button");
   if (!b) {
     const mt = e.target.closest("[data-mtarget]");   // モンスターの指示：相手のモンスターを押すと攻撃

@@ -405,6 +405,55 @@ details.rules ul { margin: 8px 0 4px; padding-left: 1.2em; display: grid; gap: 4
 .dk-foot { position: sticky; bottom: -20px; background: #fffaf0; padding: 10px 0 4px; border-top: 1px solid rgba(28,34,48,.12); }
 .modeflag { font-size: 12px; font-weight: 700; color: var(--muted); }
 
+/* 状態のチップ：名前だけ。タッチすると効果が開く */
+button.st, button.stack { font: inherit; text-align: left; cursor: pointer; }
+.tip small { display: none; }
+.tip.open small { display: block; }
+.tip:not(.open) b::after { content: " ▾"; font-size: .75em; opacity: .55; }
+.stack b { display: flex; gap: 6px; align-items: baseline; }
+/* 試合中は見出しを出さず、ボタンと昼夜を細くする */
+#game .brand { display: none; }
+#game .top { justify-content: flex-end; }
+.sky { grid-template-columns: auto 1fr; align-items: center; gap: 4px 12px; padding-block: 8px; }
+.sky-head { display: contents; }
+.sky-head span { grid-column: 1 / -1; order: 3; }
+.cell { height: 18px; font-size: 10px; }
+
+/* どの幅でも：ゲージは1行、自分のゲージは手札の帯に出す、状態は1行に並べる、手札の帯は画面下に固定 */
+.bars { grid-template-columns: auto 1fr auto auto 1fr auto; gap: 4px 10px; }
+.result { display: none; }
+#side-me .bars, #side-me .side-head { display: none; }
+#side-me .status { display: none; }   /* 自分の状態は手札の帯（自分のゲージの下）に出す */
+.mystatus:empty { display: none; }
+.mybars { display: grid; grid-template-columns: auto auto 1fr auto auto 1fr auto; gap: 4px 10px; align-items: center; font-variant-numeric: tabular-nums; padding: 0 2px; }
+.mybars > span { font-size: 12.5px; color: var(--muted); }
+.mybars > span:first-child { font-weight: 700; color: var(--ink); }
+.mybars output { font-weight: 700; text-align: right; }
+.status { display: flex; flex-wrap: wrap; gap: 6px; }
+.st-row, .sts, .stacks { display: contents; }
+.st-head { display: none; }
+.st.neg { border-color: var(--bad); } .st.pos { border-color: var(--good); }
+.dock {
+  position: sticky; bottom: 0; z-index: 5; margin-inline: -16px; padding: 8px 16px calc(8px + env(safe-area-inset-bottom, 0px));
+  background: var(--sky-bot); border-top: 1px solid var(--line); gap: 8px; box-shadow: 0 -8px 20px rgba(0, 0, 0, .18);
+}
+.hand { padding: 16px 4px 2px; }
+.c-top { display: none; }
+.c-main { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; min-height: 0; }
+.c-main big { font-size: 21px; }
+.card { padding: 8px 9px 7px; gap: 3px; }
+.c-btn { padding: 5px 6px; }
+.guide { padding: 6px 12px; }
+.pile, .slot { min-height: 76px; }
+.hand-head strong { font-size: 15px; }
+
+/* 広い画面：相手の場と自分の場を左右に並べて、縦に収める */
+@media (min-width: 900px) {
+  #game { grid-template-columns: 1fr 1fr; align-items: start; }
+  #game > .top, #game > .sky, #game > .dock, #game > .logbox { grid-column: 1 / -1; }
+  #side-me { align-self: stretch; align-content: start; }
+}
+
 /* スマホ：情報を詰めて、案内と手札を画面下に固定する */
 @media (max-width: 600px) {
   body { font-size: 14px; }
@@ -415,7 +464,22 @@ details.rules ul { margin: 8px 0 4px; padding-left: 1.2em; display: grid; gap: 4
   .sky { gap: 5px; }
   .sky-head strong { font-size: 16px; }
   .sky-head span { font-size: 11.5px; }
-  .cell { height: 18px; font-size: 10px; }
+  .cell { height: 15px; font-size: 9px; border-radius: 3px; }
+  .track { gap: 2px; }
+  .sky-head strong { font-size: 14px; }
+  .sky-head span { display: none; }
+  .sky { padding-block: 6px; }
+  #game .top { margin-bottom: -4px; }
+  #game .top .btn.small { padding: 3px 9px; }
+  .result { display: none; }
+  #side-me .bars, #side-me .side-head { display: none; }
+  /* 状態は見出しなしで1行に並べる（悪い効果は赤の枠、良い効果は緑の枠） */
+  .status { display: flex; flex-wrap: wrap; gap: 4px; }
+  .st-row, .sts, .stacks { display: contents; }
+  .st-head { display: none; }
+  .st, .stack { padding: 2px 7px; }
+  .st.neg { border-color: var(--bad); } .st.pos { border-color: var(--good); }
+  .st b, .stack b { font-size: 11.5px; }
   .side { gap: 4px; }
   .side-name { font-size: 16px; }
   .chip { font-size: 11px; padding: 1px 7px; }
@@ -661,6 +725,7 @@ div.prof-card { cursor: default; flex-wrap: wrap; }
       <span>シールド</span><div class="bar"><i class="sh" id="mini-sh"></i><b class="gh" id="mini-shg"></b></div><output id="mini-sho"></output>
       <span>HP</span><div class="bar"><i class="hp" id="mini-hp"></i><b class="gh" id="mini-hpg"></b></div><output id="mini-hpo"></output>
     </div>
+    <div class="status mystatus" id="dock-status" aria-label="あなたの状態"></div>
     <section class="box guide" id="guide" aria-live="polite"></section>
     <section aria-label="手札">
       <div class="hand-head"><strong>手札</strong><span id="deckInfo"></span></div>
