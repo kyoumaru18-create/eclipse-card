@@ -56,6 +56,8 @@ function monExtra(c) {
   return (c.mpoison ? `・当たると毒${c.mpoison}` : "") + (c.mthorn ? `・場にいる間、あなたが攻撃されるたび${c.mthorn}返す` : "")
     + (c.mzeal ? "・仏の怒りの溜め1つごとに攻撃+1" : "") + (c.mdrain ? `・攻撃するたびHP+${c.mdrain}` : "") + (c.hpcost ? `・HPを${c.hpcost}払う` : "");
 }
+/* 1ターンに使える枚数に数えないカード（陽転・月転、モンスターのコール） */
+function uncounted(c, mode) { return mode === "use" && (!!c.free || c.type === "summon"); }
 function isOugi(c) { return c.type === "buddha" || c.type === "ougi"; }
 /* 秘奥：日没・夜明けに昼と夜の指定カードを同時に使うと1つ選べる。選べる候補はデッキのタイプで変わる */
 const BUFFS = {
@@ -573,7 +575,7 @@ class Game {
   }
   /* counted=false は秘奥の同時使用（1ターンの枚数制限に数えない） */
   canPlay(p, c, mode, counted = true) {
-    if (counted && (p.plays || 0) >= playLimit(p) && !(mode === "use" && c.free)) return false;
+    if (counted && (p.plays || 0) >= playLimit(p) && !uncounted(c, mode)) return false;
     // 奥義は溜めるだけ。同じ奥義は1ターン1枚。怒り状態でも仏の怒りだけは使える
     if (isOugi(c)) return mode === "use" && !p.stackUsed.includes(c.id) && (!p.wrath || c.id === "buddha");
     if (p.wrath) return mode === "use" && !!c.wrathok;   // 怒り状態では、合掌（を使う）だけ
@@ -587,7 +589,7 @@ class Game {
     this.target = this.opp(p).monsters.some(m => m.uid === target) ? target : null;
     p.hand.splice(p.hand.indexOf(c), 1);
     delete c.hidden;   // 使えば中身が分かる
-    if (!(mode === "use" && c.free)) p.plays = (p.plays || 0) + 1;   // 陽転・月転は使う枚数に数えない
+    if (!uncounted(c, mode)) p.plays = (p.plays || 0) + 1;   // 陽転・月転・モンスターは使う枚数に数えない
     const before = this.snap();
     this.resolve(p, c, mode);
     p.usedTurn = (p.usedTurn || 0) + 1;
@@ -1208,6 +1210,9 @@ const AI = {
     }
     for (const c of hand)   // 陽転・月転（枚数に数えない）は、合う時間帯なら先に使う
       if (c.type === "convert" && g.canPlay(p, c, "use") && this.score(g, p, c) != null) return [c.uid, "use"];
+    const keep0 = this.reserved(p);   // モンスターは枚数に数えないので、出せるなら先に出す（engine.py と同じ）
+    const mc = hand.find(c => c.type === "summon" && g.canPlay(p, c, "use") && p.shield - c.cost >= this.RESERVE && !keep0.has(c.uid) && this.score(g, p, c) != null);
+    if (mc) return [mc.uid, "use"];
     if ((p.plays || 0) >= playLimit(p)) return null;   // 1ターンの枚数を使い切った（秘奥の同時使用だけは上で済ませてある）
     for (const c of hand)
       if (c.type === "attack" && g.preview(p, c) >= o.hp + o.shield && p.hp + p.shield > c.cost) return [c.uid, "use"];
@@ -1616,7 +1621,7 @@ function cardMain(p, c) {
   }
   if (c.type === "summon") {
     const per = g.incoming(g.opp(p), g.outgoing(p, c.power, g.attrMult(c.attr, p)));
-    return `<big class="${per > c.power ? "boost" : ""}">攻${per}</big>HP${c.hp}。場にコールし、ターン終了時に相手を攻撃${monExtra(c)}。倒されるとドロップゾーンへ`;
+    return `<big class="${per > c.power ? "boost" : ""}">攻${per}</big>HP${c.hp}。場にコールし、ターン終了時に相手を攻撃${monExtra(c)}。倒されるとドロップゾーンへ。<b>使う枚数に数えない</b>`;
   }
   const k = stackOf(p, c.id).length, next = k + 1;
   const hint = next >= R.OUGI_AT ? `次で必殺技：${OUGI[c.id].desc.split("＋")[0]}`
@@ -1913,7 +1918,7 @@ function cardBrief(c, id = c.id) {   // カード一覧（CARDS）の中身に�
     case "counter": return `次に受ける攻撃を半分にし、半分を返す${c.draw ? "。1枚引く" : ""}`;
     case "bloodshield": return `HPを${c.hpcost}払ってシールド+${c.power}`;
     case "regen": return `${c.turns}ターンの間、毎ターンHP+${c.power}`;
-    case "summon": return `場にコール：攻撃${c.power}・HP${c.hp}（ターン終了時に攻撃${monExtra(c)}。倒されるとドロップゾーンへ）`;
+    case "summon": return `場にコール：攻撃${c.power}・HP${c.hp}（ターン終了時に攻撃${monExtra(c)}。倒されるとドロップゾーンへ。使う枚数に数えない）`;
     case "buddha": case "ougi": return `溜めている間：${[1, 2, 3].map(k => OUGI[id]?.charge(k)).join(" → ")}。${R.OUGI_AT}枚目で必殺技：${OUGI[id]?.desc || ""}`;
   }
   return "";
