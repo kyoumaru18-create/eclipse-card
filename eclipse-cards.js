@@ -143,7 +143,7 @@ const CARDS = {
   zanshou:     { name: "残照",     attr: "day",   type: "attack",  power: 5, allday: true, cost: 3, recover: 3 },
   nichirin:    { name: "日輪の盾", attr: "day",   type: "sunshield", power: 4, cost: 0, recover: 2 },
   oborozuki:   { name: "朧月",     attr: "night", type: "attack",  power: 6, allday: true, cost: 3, recover: 3 },
-  shingetsu:   { name: "新月",     attr: "night", type: "shieldbreak", power: 7, cost: 2, recover: 3 },
+  shingetsu:   { name: "亡月",     attr: "night", type: "shieldbreak", power: 7, cost: 2, recover: 3 },
   kamaenaoshi: { name: "構え直し", attr: "day",   type: "counter", draw: 1, cost: 3, recover: 3 },
   katsu:       { name: "喝",       attr: "night", type: "attack",  power: 5, zeal: true, cost: 3, recover: 3 },
   nembutsu:    { name: "念仏",     attr: "day",   type: "nembutsu", power: 5, cost: 0, recover: 2 },
@@ -695,7 +695,7 @@ class Game {
     } else if (c.type === "shieldbreak") {
       const n = Math.min(o.shield, c.power);
       o.shield -= n;
-      this.log(`新月で${o.name}のシールド-${n}`, "dmg", this.idx(o), n);
+      this.log(`亡月で${o.name}のシールド-${n}`, "dmg", this.idx(o), n);
     } else if (c.type === "nembutsu") {
       const b = p.shield;
       p.shield = Math.min(R.SHIELD_CAP, p.shield + c.power + 2 * charge(p, "buddha"));
