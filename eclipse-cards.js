@@ -23,7 +23,7 @@ const TYPE_JP = { attack: "攻撃", heal: "HP回復", poison: "毒", bleed: "出
   draw: "ドロー", sutra: "サーチ", gassho: "シールド", linger: "毒", calm: "守り", dohatsu: "守り", berserk: "強化", koromo: "守り", wait: "反撃", dokumaku: "守り", mimic: "守り", sunshield: "シールド", shieldbreak: "シールド破壊", nembutsu: "シールド", guard: "守り", buddha: "奥義", ougi: "奥義" };
 const MONSTER_EXPECT = 3;   // モンスターが倒されるまでに攻撃する回数の目安（AIの見積もり用）
 const REVENGE_RATE = 0.5;   // 報復：前の相手ターンに受けたダメージのこの割合を上乗せ
-const BLOOD = { SHURA_HEAL: 10, SHURA_MULT: 1.25, RAGE_STEP: 4 };   // 自傷デッキ用（修羅の回復量・倍率、狂血の増え方）
+const BLOOD = { SHURA_HEAL: 10, SHURA_CAP: 6, RAGE_STEP: 4 };   // 自傷デッキ用（修羅の回復量・溜めの上限、狂血の増え方）
 /* パックの奥義の数値（engine.py と同じ） */
 const NEW_OUGI = { GYOKUTO_DMG: 16, GYOKUTO_CHARGE: 1, NEHAN_HEAL: 20, NEHAN_CHARGE: 1, MEIKYO_CHARGE: 3, MEIKYO_CUT: 5, CHIMATSURI_CHARGE: 2 };
 /* 奥義：4枚溜めると必殺技（同じ奥義は1ターン1枚） */
@@ -33,10 +33,10 @@ const OUGI = {
                charge: k => k >= R.WRATH_AT ? `怒り状態：受ける攻撃-${R.WRATH_REDUCE}` : `受ける攻撃-${2 * k}` },
   amaterasu: { name: "天照",     desc: "10ダメージ＋以降、自分の昼カードは常に1.5倍", charge: k => `昼カードのダメージ+${2 * k}` },
   tsukuyomi: { name: "月読",     desc: "10ダメージ＋以降、相手のシールド回復量が半分・自分の夜カードは常に1.5倍", charge: k => `相手のシールド回復-${k}` },
-  kodoku:    { name: "蠱毒",     desc: "相手に毒8＋以降、自分が与える毒と出血のダメージが3倍", charge: k => `毎ターン相手のHPに直接${k}` },
+  kodoku:    { name: "蠱毒",     desc: "相手に毒12＋以降、自分が与える毒と出血のダメージが3倍", charge: k => `毎ターン相手のHPに直接${k}` },
   kyoka:     { name: "鏡花水月", desc: "相手の攻撃カードを1回だけ1.5倍にして跳ね返せる（受けるときに選ぶ）",
                charge: k => `受ける攻撃-${Math.round(R.KYOKA_CUT * k * 100)}%・受けた半分を返す` },
-  shura:     { name: "修羅",     desc: "HP10回復＋以降、HPを払うカードのダメージが1.25倍", charge: k => `HPを払うカードのダメージ+${k}` },
+  shura:     { name: "修羅",     desc: "HP10回復＋そのターン、HPを払うカードは何枚でも使える", charge: k => `HPを払うたび、次の攻撃+${k}（+${BLOOD.SHURA_CAP}まで）` },
   /* ここから下はカードパックで手に入る奥義 */
   kinu:      { name: "金烏",     desc: "陽光+2＋そのターンは影討ち（使えるカード3枚・与えるダメージ2倍）", charge: k => `昼カードを使うたびシールド+${k}` },
   gyokuto:   { name: "玉兎",     desc: `${NEW_OUGI.GYOKUTO_DMG}ダメージ＋相手の手札を1枚捨てさせる`, charge: k => `相手のターンの始めに相手のシールド-${NEW_OUGI.GYOKUTO_CHARGE * k}` },
@@ -57,7 +57,7 @@ function monExtra(c) {
     + (c.mzeal ? "・仏の怒りの溜め1つごとに攻撃+1" : "") + (c.mdrain ? `・攻撃するたびHP+${c.mdrain}` : "") + (c.hpcost ? `・HPを${c.hpcost}払う` : "");
 }
 /* 1ターンに使える枚数に数えないカード（陽転・月転、モンスターのコール） */
-function uncounted(c, mode) { return mode === "use" && (!!c.free || c.type === "summon"); }
+function uncounted(c, mode, p = null) { return mode === "use" && (!!c.free || c.type === "summon" || !!(p?.shuraTurn && c.hpcost)); }   // 修羅のターンはHPを払うカードも
 function isOugi(c) { return c.type === "buddha" || c.type === "ougi"; }
 /* 秘奥：日没・夜明けに昼と夜の指定カードを同時に使うと1つ選べる。選べる候補はデッキのタイプで変わる */
 const BUFFS = {
@@ -277,7 +277,8 @@ function newPlayer(name, isAI, def, chosen, cos = null) {
            wrathTurns: 0,       // 怒り状態で4枚目を待ったターン数（必殺技のダメージが増える）
            kyoka: false,       // 鏡花水月（相手の攻撃カードを1回だけ1.5倍で跳ね返せる）
            regen: 0, regenTurns: 0,   // 再生（毎ターンHP回復）
-           shura: false,       // 修羅（HPを払うカードのダメージが1.5倍）
+           shuraStore: 0,      // 修羅を溜めている間に、HPを払って溜めた分（次の攻撃に乗る）
+           shuraTurn: false,   // 修羅を撃ったターン（HPを払うカードは枚数に数えない）
            blessing: [],        // 天照・月読の加護（この属性のカードは常に1.5倍）
            kodoku: false,       // 蠱毒（自分が与える毒・出血が3倍）
            recoverHalf: false,  // 相手の月読（シールド回復量が半分）
@@ -419,9 +420,8 @@ class Game {
     if (p.berserkTurns) power += debuffs(p);   // 狂乱：自分のデバフの数だけ
     if (c.revenge) power += Math.floor((p.revengeBase || 0) * REVENGE_RATE);
     if (c.attr === "day") power += 2 * charge(p, "amaterasu");   // 天照を溜めている間：+2k
-    if (c.hpcost) power += charge(p, "shura");                    // 修羅を溜めている間：+k
+    power += p.shuraStore || 0;                                  // 修羅を溜めている間に、HPを払って溜めた分
     if (c.frenzy && p.hp <= Math.floor(R.MAX_HP / 2)) power *= 2;  // 鮮血の舞：HPが半分以下なら2倍
-    if (p.shura && c.hpcost) power *= BLOOD.SHURA_MULT;
     return power;
   }
   preview(p, c) {
@@ -510,8 +510,13 @@ class Game {
     for (const m of [...t.monsters]) if (m.mthorn && !this.over) this.dealDamage(attacker, m.mthorn * this.escalation(), "門番");
   }
   /* 毒・出血を付ける */
-  /* 血祭りを溜めている間：HPを払うたび、相手のHPにも直接 */
+  /* HPを払ったとき。修羅を溜めている間：次の攻撃+k。血祭りを溜めている間：相手のHPにも直接 */
   bloodFeast(p) {
+    const sk = charge(p, "shura");
+    if (sk) {
+      p.shuraStore = Math.min(BLOOD.SHURA_CAP, (p.shuraStore || 0) + sk);
+      this.log(`修羅：次の攻撃+${p.shuraStore}`, "buff", this.idx(p));
+    }
     const k = NEW_OUGI.CHIMATSURI_CHARGE * charge(p, "chimatsuri");
     if (k && !this.over) this.dotHit(this.opp(p), k, "血祭り");
   }
@@ -587,7 +592,7 @@ class Game {
   }
   /* counted=false は秘奥の同時使用（1ターンの枚数制限に数えない） */
   canPlay(p, c, mode, counted = true) {
-    if (counted && (p.plays || 0) >= playLimit(p) && !uncounted(c, mode)) return false;
+    if (counted && (p.plays || 0) >= playLimit(p) && !uncounted(c, mode, p)) return false;
     // 奥義は溜めるだけ。同じ奥義は1ターン1枚。怒り状態でも仏の怒りだけは使える
     if (isOugi(c)) return mode === "use" && !p.stackUsed.includes(c.id) && (!p.wrath || c.id === "buddha");
     if (p.wrath) return mode === "use" && !!c.wrathok;   // 怒り状態では、合掌（を使う）だけ
@@ -601,9 +606,10 @@ class Game {
     this.target = this.opp(p).monsters.some(m => m.uid === target) ? target : null;
     p.hand.splice(p.hand.indexOf(c), 1);
     delete c.hidden;   // 使えば中身が分かる
-    if (!uncounted(c, mode)) p.plays = (p.plays || 0) + 1;   // 陽転・月転・モンスターは使う枚数に数えない
+    if (!uncounted(c, mode, p)) p.plays = (p.plays || 0) + 1;   // 陽転・月転・モンスター・修羅のターンのHPを払うカードは使う枚数に数えない
     const before = this.snap();
     this.resolve(p, c, mode);
+    if (mode === "use" && c.type === "attack") p.shuraStore = 0;   // 修羅で溜めた分は、攻撃に使ったら消える
     p.usedTurn = (p.usedTurn || 0) + 1;
     this.target = null;   // 狙いはこのカードだけ（同時使用などに持ち越さない）
     this.summary(`${p.name}の${c.name}${mode === "recover" ? "（回復）" : ""}`, before);
@@ -860,9 +866,9 @@ class Game {
       this.log(`${o.name}に毒${R.KODOKU_POISON}。以降、${p.name}が与える毒と出血は${R.KODOKU_MULT}倍`, "buff");
       this.afflict(p, o, R.KODOKU_POISON);
     } else if (key === "shura") {
-      p.shura = true;
+      p.shuraTurn = true;
       this.heal(p, BLOOD.SHURA_HEAL, "修羅");
-      this.log(`以降、${p.name}のHPを払うカードのダメージは${BLOOD.SHURA_MULT}倍`, "buff");
+      this.log(`このターン、${p.name}はHPを払うカードを何枚でも使える`, "buff");
     } else if (key === "kinu") {
       p.polar = (p.polar || 0) + 2; p.kageuchi = true;
       this.log(`金烏：${p.name}は陽光+2（${p.polar}つ）。このターンは影討ち（使えるカード${KAGEUCHI_LIMIT}枚・与えるダメージ${KAGEUCHI_MULT}倍）`, "buff");
@@ -987,7 +993,7 @@ class Game {
   beginTurn(p) {
     this.log(`第${this.round}巡【${PHASE_JP[this.phase]}】${p.name}のターン`, "turn");
     p.usedTurn = 0; p.hpPaidTurn = 0;
-    p.kageuchi = false; p.meikyo = false;
+    p.kageuchi = false; p.meikyo = false; p.shuraTurn = false;
     p.dokumaku = 0; p.mimic = 0;   // 毒の膜・擬態は次の自分のターンまで
     for (const m of p.monsters) m.acted = false;   // モンスターは自分のターンごとに1回攻撃できる
     const nk = NEW_OUGI.NEHAN_CHARGE * charge(p, "nehan");
@@ -1235,6 +1241,15 @@ const AI = {
     const keep0 = this.reserved(p);   // モンスターは枚数に数えないので、出せるなら先に出す（engine.py と同じ）
     const mc = hand.find(c => c.type === "summon" && g.canPlay(p, c, "use") && p.shield - c.cost >= this.RESERVE && !keep0.has(c.uid) && this.score(g, p, c) != null);
     if (mc) return [mc.uid, "use"];
+    if (p.shuraTurn && (p.plays || 0) >= playLimit(p)) {   // 修羅のターン：HPを払うカードは枚数に数えないので使い切る（engine.py と同じ）
+      let best = null;
+      for (const c of hand) {
+        if (!c.hpcost || !g.canPlay(p, c, "use")) continue;
+        const v = this.score(g, p, c);
+        if (v != null && (!best || v > best[0])) best = [v, c.uid];
+      }
+      if (best) return [best[1], "use"];
+    }
     if ((p.plays || 0) >= playLimit(p)) return null;   // 1ターンの枚数を使い切った（秘奥の同時使用だけは上で済ませてある）
     for (const c of hand)
       if (c.type === "attack" && g.preview(p, c) >= o.hp + o.shield && p.hp + p.shield > c.cost) return [c.uid, "use"];
@@ -1514,7 +1529,8 @@ function statusChips(p) {
   if (p.blessing.includes("day")) tag(good, "天照の加護", "昼カードが常に1.5倍");
   if (p.blessing.includes("night")) tag(good, "月読の加護", "夜カードが常に1.5倍");
   if (p.kodoku) tag(good, "蠱毒", `与える毒と出血が${R.KODOKU_MULT}倍`);
-  if (p.shura) tag(good, "修羅", `HPを払うカードが${BLOOD.SHURA_MULT}倍`);
+  if (p.shuraStore) tag(good, `修羅の溜め+${p.shuraStore}`, "次の攻撃に乗る");
+  if (p.shuraTurn) tag(good, "修羅", "このターン、HPを払うカードは何枚でも使える");
   for (const b of BUFF_ORDER) if (p.buffs.has(b)) tag(good, BUFFS[b][0], BUFFS[b][1].replace("以降、", ""), "hiou");
   return { good, bad };
 }
@@ -1750,7 +1766,7 @@ function render() {
   if (!g) return;
   const me = g.players[seat], en = g.players[1 - seat];
   const myTurn = myTurnNow();
-  document.documentElement.dataset.phase = g.phase;
+  if (document.body.dataset.view === "game") document.documentElement.dataset.phase = g.phase;
   $("modeFlag").textContent = mode === "online" ? `オンライン・部屋 ${room?.code || ""}` : "AI対戦";
 
   const idx = (g.round - 1) % CYCLE.length;
@@ -2042,7 +2058,11 @@ function deckEdit(act, b) {
 /* ===== メニュー ===== */
 /* ===== ホーム画面（AI対戦・オンライン・デッキ編集・チュートリアル・設定） ===== */
 let playing = false;   // 試合を始めたか（「続きから」を出す）
-function setView(v) { document.body.dataset.view = v; if (v === "game") render(); }
+function setView(v) {
+  document.body.dataset.view = v;
+  if (v === "game") render();
+  else delete document.documentElement.dataset.phase;   // 試合の昼夜の背景は、試合の画面だけ（ホームなどには持ち越さない）
+}
 function showHome(msg = "", ok = false) {
   hideDialog();
   setView("home");
