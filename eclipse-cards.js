@@ -20,7 +20,7 @@ const PHASE_JP = { day: "昼", dusk: "日没", night: "夜", dawn: "夜明け" }
 const ATTR_JP = { day: "昼", night: "夜", none: "無", both: "昼夜" };   // both：昼でも夜でも1.5倍
 const TYPE_JP = { attack: "攻撃", heal: "HP回復", poison: "毒", bleed: "出血", counter: "反撃", summon: "召喚", bloodshield: "血の盾", regen: "再生",
   parry: "見切り", karma: "因果応報", thorns: "棘", corrode: "腐食", bloom: "毒の開花", convert: "属性変化",
-  draw: "ドロー", sutra: "サーチ", gassho: "シールド", linger: "毒", calm: "守り", dohatsu: "守り", sunshield: "シールド", shieldbreak: "シールド破壊", nembutsu: "シールド", guard: "守り", buddha: "奥義", ougi: "奥義" };
+  draw: "ドロー", sutra: "サーチ", gassho: "シールド", linger: "毒", calm: "守り", dohatsu: "守り", berserk: "強化", sunshield: "シールド", shieldbreak: "シールド破壊", nembutsu: "シールド", guard: "守り", buddha: "奥義", ougi: "奥義" };
 const MONSTER_EXPECT = 3;   // モンスターが倒されるまでに攻撃する回数の目安（AIの見積もり用）
 const REVENGE_RATE = 0.5;   // 報復：前の相手ターンに受けたダメージのこの割合を上乗せ
 const BLOOD = { SHURA_HEAL: 10, SHURA_MULT: 1.25, RAGE_STEP: 4 };   // 自傷デッキ用（修羅の回復量・倍率、狂血の増え方）
@@ -107,7 +107,7 @@ const CARDS = {
   tsukuyomi:{ name: "月読",       attr: "none",  type: "ougi",    cost: 0, recover: 0 },
   kodoku:   { name: "蠱毒",       attr: "none",  type: "ougi",    cost: 0, recover: 0 },
   kyoka:    { name: "鏡花水月",   attr: "none",  type: "ougi",    cost: 0, recover: 0 },
-  bloodblade:  { name: "血刃",   attr: "night", type: "attack",      power: 7, hpcost: 3, cost: 0, recover: 4 },
+  bloodblade:  { name: "血刃",   attr: "night", type: "attack",      power: 5, hpcost: 3, cost: 0, recover: 4 },
   bloodlust:   { name: "狂血",   attr: "night", type: "attack",      power: 3, rage: true, hpcost: 2, cost: 2, recover: 4 },
   bloodshield: { name: "血の盾", attr: "day",   type: "bloodshield", power: 8, hpcost: 4, cost: 0, recover: 5 },
   regen:       { name: "再生",   attr: "day",   type: "regen",       power: 3, turns: 4, cost: 2, recover: 4 },
@@ -139,6 +139,7 @@ const CARDS = {
   kongo:    { name: "金剛",     attr: "day",   type: "guard",   power: 4, wrathok: true, cost: 2, recover: 3 },
   zazen:    { name: "座禅",     attr: "day",   type: "heal",    power: 4, cure: true, wrathok: true, cost: 0, recover: 2 },
   fudoushin:{ name: "不動心",   attr: "night", type: "calm",    wrathok: true, cost: 2, recover: 3 },
+  berserk:  { name: "狂乱",     attr: "night", type: "berserk", turns: 3, cost: 2, recover: 3 },
   dohatsu:  { name: "怒髪天",   attr: "night", type: "dohatsu", power: 2, turns: 3, wrathok: true, cost: 2, recover: 3 },
   shura:   { name: "修羅",       attr: "none",  type: "ougi",    cost: 0, recover: 0 },
 };
@@ -155,7 +156,7 @@ const PRESETS = {
   buddha: { name: "仏の怒り", cards: {
     buddha: 4, sutra: 2, gassho: 2, kongo: 2, zazen: 2, fudoushin: 2, dohatsu: 2, counter: 3, heal: 3, firstaid: 3, katsu: 2, nembutsu: 2, slash: 2, ambush: 1, drain: 2, needle: 2 } },
   blood: { name: "自傷", cards: {
-    bloodblade: 3, bloodlust: 3, bloodshield: 3, regen: 3, recoil: 3, shura: 4, bloodpact: 2, backsplash: 2, bloodwaltz: 2, drain: 2, rengeki: 2, slash: 2, heal: 2, firstaid: 3 } },
+    bloodblade: 3, bloodlust: 3, bloodshield: 3, regen: 3, recoil: 3, shura: 4, bloodpact: 2, backsplash: 2, bloodwaltz: 2, drain: 2, rengeki: 2, berserk: 2, heal: 2, firstaid: 3 } },
 };
 const DEFAULT_PRESET = "buddha";   // 最初に使うデッキ。保存データがおかしいときもこれに戻す
 const DECK = PRESETS[DEFAULT_PRESET].cards;
@@ -240,6 +241,8 @@ function newPlayer(name, isAI, def, chosen, cos = null) {
 function hiouOptions(p) { return HIOU_SETS[p.hiou || "balanced"].filter(b => !p.buffs.has(b)); }
 function stackOf(p, id) { return p.stacks[id] || []; }
 /* 仏の怒りの必殺技の基本ダメージ（怒り状態で待ったターンだけ増える） */
+/* 狂乱：受けたダメージこの量ごとに次の攻撃+1。その間は眠り・痺れ・暗闇が効かないが、返されるダメージは2倍で、溜まらない */
+const BERSERK_PER = 2, BERSERK_CAP = 8, BERSERK_REFLECT = 2, REFLECT_SOURCES = ["反撃", "鏡花水月", "水月", "棘の鎧"];
 const DOHATSU_PER = 2;   // 怒髪天：受けたダメージこの量ごとに、必殺技+1・HP+1
 function finisherBase(p) { return R.FINISH_DMG + R.WAIT_BONUS * (p.wrathTurns || 0) + Math.floor((p.anger || 0) / DOHATSU_PER); }
 
@@ -340,6 +343,7 @@ class Game {
     if (c.zeal) power += 2 * charge(p, "buddha");   // 喝：仏の怒りの溜め×2
     if (c.fury) power += 2 * (p.usedTurn || 0) + Math.floor((p.hpPaidTurn || 0) / 3);   // 血の連撃：このターン使ったカード・払ったHP
     if (c.rage) power += Math.floor(Math.max(0, R.MAX_HP - p.hp) / BLOOD.RAGE_STEP);
+    power += Math.floor((p.fury || 0) / BERSERK_PER);   // 狂乱で溜めた分
     if (c.revenge) power += Math.floor((p.revengeBase || 0) * REVENGE_RATE);
     if (c.attr === "day") power += 2 * charge(p, "amaterasu");   // 天照を溜めている間：+2k
     if (c.hpcost) power += charge(p, "shura");                    // 修羅を溜めている間：+k
@@ -360,6 +364,7 @@ class Game {
   }
   /* 攻撃を当てる。attacker があれば反撃の構えが発動しうる。実際に与えた量を返す */
   dealDamage(t, amount, src, attacker = null) {
+    if (t.berserkTurns && REFLECT_SOURCES.includes(src)) amount *= BERSERK_REFLECT;   // 狂乱：返されると痛い
     return this.hit(t, this.incoming(t, amount), src, attacker);
   }
   /* 受け手側の補正（防御強化・怒り状態）を計算済みのダメージを当てる */
@@ -388,7 +393,7 @@ class Game {
     const th = amt - ab;
     t.hp -= th;
     if (attacker) t.taken = (t.taken || 0) + amt;
-    this.angerHit(t, amt);
+    this.angerHit(t, amt, !REFLECT_SOURCES.includes(src));
     this.log(`${src} → ${t.name}に${amt}ダメージ（シールド-${ab}${th ? `、HP-${th}` : ""}）`, "dmg", this.idx(t), amt);
     this.checkDead();
     if (reflect && !this.over) {
@@ -432,7 +437,8 @@ class Game {
     if (p.karmaTurns) p.karmaStore = (p.karmaStore || 0) + n;
   }
   /* 怒髪天の間：受けたダメージ2ごとに、必殺技+1・HP+1 */
-  angerHit(p, n) {
+  angerHit(p, n, fury = true) {
+    if (fury && p.berserkTurns && n > 0 && !this.over) p.fury = Math.min(BERSERK_CAP * BERSERK_PER, (p.fury || 0) + n);   // 狂乱：受けたダメージを次の攻撃に溜める（+8まで）
     if (!p.dohatsuTurns || n <= 0 || this.over) return;
     const before = p.anger || 0;
     p.anger = before + n;
@@ -496,7 +502,9 @@ class Game {
     delete c.hidden;   // 使えば中身が分かる
     if (!(mode === "use" && c.free)) p.plays = (p.plays || 0) + 1;   // 陽転・月転は使う枚数に数えない
     const before = this.snap();
+    const furyUsed = mode === "use" && c.type === "attack" ? Math.floor((p.fury || 0) / BERSERK_PER) * BERSERK_PER : 0;
     this.resolve(p, c, mode);
+    if (furyUsed) p.fury -= furyUsed;   // 攻撃に使った分は消える（その攻撃で返された分は溜まらない）
     p.usedTurn = (p.usedTurn || 0) + 1;
     this.target = null;   // 狙いはこのカードだけ（同時使用などに持ち越さない）
     this.summary(`${p.name}の${c.name}${mode === "recover" ? "（回復）" : ""}`, before);
@@ -519,6 +527,7 @@ class Game {
   /* おまけの効果：相手の次のターンを鈍らせる（眠り＝引く枚数-1、痺れ＝使えるカード-1） */
   slowDown(p, c) {
     const o = this.opp(p);
+    if (o.berserkTurns && (c.sleep || c.blind || c.numbing)) { this.log(`${o.name}は狂乱していて効かない`); return; }
     if (c.sleep && !o.drowsyNext) { o.drowsyNext = 1; this.log(`${o.name}は眠くなった（次のターン、引く枚数が1枚減る）`); }
     if (c.blind) { o.blind = Math.max(o.blind || 0, c.blind); this.log(`${o.name}は暗闇になった（${o.blind}ターンの間、引いたカードが裏向きになる）`, "", this.idx(o)); }
     if (c.numbing && !o.numbNext) { o.numbNext = 1; this.log(`${o.name}は痺れた（次のターン、使えるカードが1枚減る）`); }
@@ -578,6 +587,10 @@ class Game {
     } else if (c.type === "calm") {
       p.calm = true;
       this.log(`${p.name}は不動心（次の自分のターンまで、毒・出血などの特殊ダメージが半分）`);
+    } else if (c.type === "berserk") {
+      p.berserkTurns = c.turns; p.drowsyNext = 0; p.numbNext = 0; p.numb = 0; p.blind = 0;
+      for (const h of p.hand) delete h.hidden;
+      this.log(`${p.name}は狂乱した（${c.turns}ターン、受けたダメージ${BERSERK_PER}ごとに次の攻撃+1。眠り・痺れ・暗闇が効かない）`, "buff", this.idx(p));
     } else if (c.type === "dohatsu") {
       p.dohatsuTurns = c.turns; p.dohatsuCut = c.power;
       this.log(`${p.name}は怒髪天（${c.turns}ターンの間、受けるダメージ-${c.power}。受けたダメージ2ごとに必殺技+1・HP+1）`, "wrath", this.idx(p));
@@ -801,7 +814,8 @@ class Game {
       if (this.over) return;
     }
     p.calm = false;   // 不動心は、このターンの毒を受けたところまで
-    if (p.dohatsuTurns) p.dohatsuTurns--;   // 怒髪天も、このターンの毒を受けたところで1ターン進む
+    if (p.dohatsuTurns) p.dohatsuTurns--;
+    if (p.berserkTurns) p.berserkTurns--;   // 狂乱も同じ   // 怒髪天も、このターンの毒を受けたところで1ターン進む
     this.karmaTick(p);   // このターンの毒まで溜めてから返す
     if (this.over) return;
     if (p.regenTurns) {
@@ -881,6 +895,10 @@ const AI = {
       return p.deck.some(x => x.id === "buddha") && have < R.OUGI_AT ? 3 : null;
     }
     if (c.type === "dohatsu") return p.dohatsuTurns ? null : 5 / Math.max(1, c.cost);
+    if (c.type === "berserk") {   // 状態異常を受けているか、相手が攻撃してくるなら（engine.py と同じ）
+      const hurt = p.drowsyNext || p.numbNext || p.blind || p.poison || p.bleed || o.monsters.length;
+      return p.berserkTurns ? null : (hurt ? 5 : 3.5) / Math.max(1, c.cost);
+    }
     if (c.type === "calm") {   // 毒などを受けていて、まだ不動心でないとき
       const danger = p.poison || p.bleed || o.kodoku || charge(o, "kodoku") || o.lingerTurns;
       return p.calm || !danger ? null : 4.5 / Math.max(1, c.cost);
@@ -1180,6 +1198,8 @@ function statusChips(p) {
   if (p.numb && p === g.active) tag(bad, "痺れ中", "このターン使えるカードが1枚減っている");
   if (p.drowsyNext) tag(bad, "眠り", "次のターン、引く枚数が1枚減る");
   if (p.calm) tag(good, "不動心", "特殊ダメージが半分");
+  if (p.berserkTurns) tag(good, `狂乱 残${p.berserkTurns}`, `次の攻撃+${Math.floor((p.fury || 0) / BERSERK_PER)}・眠り・痺れ・暗闇が効かない・返されるダメージ2倍`);
+  else if (p.fury >= BERSERK_PER) tag(good, "狂乱の溜め", `次の攻撃+${Math.floor(p.fury / BERSERK_PER)}`);
   if (p.dohatsuTurns) tag(good, `怒髪天 残${p.dohatsuTurns}`, `受けるダメージ-${p.dohatsuCut}・溜め${Math.floor((p.anger || 0) / DOHATSU_PER)}（必殺技に上乗せ）`);
   else if (p.anger >= DOHATSU_PER) tag(good, "怒りの溜め", `必殺技+${Math.floor(p.anger / DOHATSU_PER)}`);
   if (p.lingerTurns) tag(bad, `蝕み 残${p.lingerTurns}`, `ターンの始めに毒${p.lingerAmt}`);
@@ -1302,6 +1322,7 @@ function cardMain(p, c) {
   if (c.type === "sutra") return `<big>仏</big>デッキから仏の怒りを1枚手札へ（残り${p.deck.filter(x => x.id === "buddha").length}枚）`;
   if (c.type === "gassho") return `<big>+${c.power}</big>シールド回復。<b>怒り状態でも使える</b>`;
   if (c.type === "calm") return `<big>½</big>次の自分のターンまで、毒・出血などの特殊ダメージが半分。<b>怒り状態でも使える</b>`;
+  if (c.type === "berserk") return `<big>${c.turns}</big>ターン、受けたダメージ2ごとに次の攻撃+1。眠り・痺れ・暗闇が効かない。ただし反撃などで返されるダメージは2倍`;
   if (c.type === "dohatsu") return `<big>-${c.power}</big>${c.turns}ターン、受けるダメージが減り、受けたダメージ2ごとに必殺技+1・HP+1。<b>怒り状態でも使える</b>`;
   if (c.type === "linger") return `<big>${c.turns}</big>ターンの間、相手のターンの始めに毒${c.power}`;
   if (c.type === "sunshield") return `<big>+${c.power * (g.phase === "night" ? 2 : 1)}</big>シールド回復（夜は2倍）`;
@@ -1575,6 +1596,7 @@ function cardBrief(c, id = c.id) {   // カード一覧（CARDS）の中身に�
     case "sutra": return "デッキから仏の怒りを1枚手札に加える";
     case "gassho": return `シールド+${c.power}。怒り状態でも使える`;
     case "calm": return "次の自分のターンまで、特殊ダメージが半分。怒り状態でも使える";
+    case "berserk": return `${c.turns}ターン、受けたダメージ2ごとに次の攻撃+1。眠り・痺れ・暗闇が効かない。返されるダメージは2倍`;
     case "dohatsu": return `${c.turns}ターン、受けるダメージ-${c.power}。受けたダメージ2ごとに必殺技+1・HP+1。怒り状態でも使える`;
     case "linger": return `${c.turns}ターンの間、相手のターンの始めに毒${c.power}`;
     case "sunshield": return `シールド+${c.power}（夜なら+${c.power * 2}）`;
