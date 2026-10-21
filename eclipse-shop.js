@@ -57,6 +57,8 @@
     p.items ||= {}; p.equip ||= {}; p.arts ||= {}; p.artUse ||= {}; p.owned ||= {};
     p.stats ||= { win: 0, lose: 0, draw: 0 }; p.escrow ||= {}; p.settled ||= [];
     for (const [kind, sec] of Object.entries(SHOP)) for (const [id, [, price]] of Object.entries(sec.items)) if (!price) p.items[`${kind}:${id}`] = 1;
+    for (const pr of Object.values(PRESETS))   // 見本デッキ6つは、最初から全部組める
+      for (const [id, n] of Object.entries(pr.cards)) p.owned[id] = Math.max(p.owned[id] || 0, n);
     p.equip.sleeve ||= "basic"; p.equip.mat ||= "basic"; p.equip.icon ||= "sun"; p.equip.title ||= "rookie"; p.equip.frame ||= "plain";
     return p;
   }
@@ -202,7 +204,7 @@
   /* ---------- はじめて：名前と最初のデッキ ---------- */
   function showStarter() {
     showDialog(`<h2>はじめよう</h2>
-      <p>名前と、最初にもらうデッキを選ぶ。選んだデッキのカード全部と、基本のカード（各2枚）がもらえる。ほかのカードはショップのカードパックで集める。</p>
+      <p>名前と、最初に使うデッキを選ぶ。見本デッキ6つのカードは全部もらえるので、あとからデッキ編集でどれにでも変えられる。カードパックでは、デッキを強くしたり別の戦い方をするためのカードが手に入る。</p>
       <label class="field">名前 <input id="nameIn" maxlength="12" value="プレイヤー" autocomplete="off"></label>
       <div class="starters">${Object.entries(PRESETS).map(([k, p]) => `<button class="opt" data-act="start-with" data-p="${k}"><b>${p.name}</b><span>${HIOU_NAME[deckType(p.cards)]}・${Object.entries(p.cards).filter(([id]) => isOugi(CARDS[id])).map(([id]) => CARDS[id].name).join("・") || "奥義なし"}</span></button>`).join("")}</div>`, "starter");
   }
