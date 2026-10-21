@@ -113,7 +113,7 @@ const CARDS = {
   sunwolf:  { name: "陽の狼",     attr: "day",   type: "summon",  power: 3, hp: 8, cost: 5, recover: 5 },
   slash:    { name: "斬撃",       attr: "night", type: "attack",  power: 5, cost: 3, recover: 3 },
   ambush:   { name: "闇討ち",     attr: "night", type: "attack",  power: 8, cost: 5, recover: 5 },
-  nightowl: { name: "夜の梟",     attr: "night", type: "summon",  power: 4, hp: 8, cost: 5, recover: 5 },
+  nightowl: { name: "夜の梟",     attr: "night", type: "summon",  power: 2, hp: 8, cost: 5, recover: 5 },
   drain:    { name: "吸血",       attr: "night", type: "attack",  power: 6, drain: true, cost: 4, recover: 4 },
   jab:      { name: "突き",       attr: "day",   type: "attack",  power: 3, cost: 2, recover: 2 },
   recoil:   { name: "捨て身",     attr: "night", type: "attack",  power: 12, recoil: 3, cost: 4, recover: 4 },
@@ -142,7 +142,7 @@ const CARDS = {
   mushibami:   { name: "蝕み",     attr: "night", type: "linger",  power: 1, turns: 3, cost: 3, recover: 3 },
   zanshou:     { name: "残照",     attr: "day",   type: "attack",  power: 5, allday: true, cost: 3, recover: 3 },
   nichirin:    { name: "日輪の盾", attr: "day",   type: "sunshield", power: 4, cost: 0, recover: 2 },
-  oborozuki:   { name: "朧月",     attr: "night", type: "attack",  power: 6, allday: true, cost: 3, recover: 3 },
+  oborozuki:   { name: "朧月",     attr: "night", type: "attack",  power: 5, allday: true, cost: 3, recover: 3 },
   shingetsu:   { name: "亡月",     attr: "night", type: "shieldbreak", power: 7, cost: 2, recover: 3 },
   kamaenaoshi: { name: "構え直し", attr: "day",   type: "counter", draw: 1, cost: 3, recover: 3 },
   katsu:       { name: "喝",       attr: "night", type: "attack",  power: 5, zeal: true, cost: 3, recover: 3 },
@@ -967,6 +967,7 @@ class Game {
     this.log(`第${this.round}巡【${PHASE_JP[this.phase]}】${p.name}のターン`, "turn");
     p.usedTurn = 0; p.hpPaidTurn = 0;
     p.kageuchi = false; p.meikyo = false;
+    for (const m of p.monsters) m.acted = false;   // モンスターは自分のターンごとに1回攻撃できる
     const nk = NEW_OUGI.NEHAN_CHARGE * charge(p, "nehan");
     if (nk && p.hp < R.MAX_HP) { p.hp = Math.min(R.MAX_HP, p.hp + nk); this.log(`涅槃：${p.name}はHP+${nk}`, "heal", this.idx(p), nk); }   // 涅槃を溜めている間
     const gk = Math.min(p.shield, NEW_OUGI.GYOKUTO_CHARGE * charge(this.opp(p), "gyokuto"));
@@ -1030,16 +1031,40 @@ class Game {
       p.blind--;
     }
   }
+  /* モンスターが与えるダメージ（仁王は仏の怒りの溜め1つごとに+1） */
+  monsterPower(owner, m) { return this.outgoing(owner, m.power + (m.mzeal ? charge(owner, "buddha") : 0), this.attrMult(m.attr, owner)); }
+  /* モンスターに指示：自分のターン中いつでも1体1回。相手のプレイヤーか相手のモンスターを攻撃する */
+  monsterAttack(p, uid, tuid = null) {
+    const m = p.monsters.find(x => x.uid === uid), o = this.opp(p);
+    if (this.over || this.pending || !m || m.acted) return false;
+    if (tuid != null && !o.monsters.some(x => x.uid === tuid)) return false;
+    const before = this.snap();
+    this.monsterHit(p, m, tuid);
+    this.summary(`${p.name}の${m.name}の攻撃`, before);
+    return true;
+  }
+  monsterHit(p, m, tuid) {
+    const o = this.opp(p);
+    m.acted = true;
+    if (tuid == null) {
+      const dealt = this.dealDamage(o, this.monsterPower(p, m), m.name, p);
+      if (this.over) return;
+      if (m.mpoison && dealt) this.afflict(p, o, m.mpoison);   // 毒蜘蛛
+    } else {   // モンスター同士：お互いの攻撃力分を受ける
+      const t = o.monsters.find(x => x.uid === tuid);
+      const mine = Math.floor(this.monsterPower(p, m) + 0.5), theirs = Math.floor(this.monsterPower(o, t) + 0.5);
+      this.log(`${m.name}が${t.name}を攻撃`, "", this.idx(p));
+      this.hitMonster(o, t.uid, mine, m.name);
+      this.hitMonster(p, m.uid, theirs, `${t.name}の反撃`);
+    }
+    if (m.mdrain && p.hp < R.MAX_HP) { p.hp = Math.min(R.MAX_HP, p.hp + m.mdrain); this.log(`${m.name}：${p.name}のHP+${m.mdrain}`, "heal", this.idx(p), m.mdrain); }   // 血の蝙蝠
+  }
   endTurn(p) {
     const o = this.opp(p);
     const before = this.snap();
-    for (const m of [...p.monsters]) {   // 場のモンスターが攻撃する（反撃の構え・棘の鎧で倒れることもある）
-      if (!p.monsters.includes(m)) continue;
-      const power = m.power + (m.mzeal ? charge(p, "buddha") : 0);   // 仁王：仏の怒りの溜め1つごとに+1
-      const dealt = this.dealDamage(o, this.outgoing(p, power, this.attrMult(m.attr, p)), m.name, p);
+    for (const m of [...p.monsters]) {   // まだ攻撃していないモンスターは、相手のプレイヤーを攻撃する
+      if (p.monsters.includes(m) && !m.acted) this.monsterHit(p, m, null);
       if (this.over) return this.summary(`${p.name}の仲間の攻撃`, before);
-      if (m.mpoison && dealt) this.afflict(p, o, m.mpoison);   // 毒蜘蛛
-      if (m.mdrain && p.hp < R.MAX_HP) { p.hp = Math.min(R.MAX_HP, p.hp + m.mdrain); this.log(`${m.name}：${p.name}のHP+${m.mdrain}`, "heal", this.idx(p), m.mdrain); }   // 血の蝙蝠
     }
     this.summary(`${p.name}の仲間の攻撃`, before);
     if (p.bleed) p.bleed--;
@@ -1069,8 +1094,31 @@ const AI = {
     const rest = p.hand.filter(c => !drop.includes(c) && c.type === "attack" && !c.hidden);
     return (p.plays || 0) === 0 && rest.length >= 2 ? drop.map(c => c.uid) : null;
   },
+  /* 相手のモンスターを殴りにいくモンスターがいれば ["mon", 自分, 相手]（engine.py の monster_order と同じ）。
+     倒せるとき（相討ちでも相手の方が強ければ）か、こちらが倒されずに相手の強いモンスターを削れるとき */
+  monsterOrder(g, p) {
+    const o = g.opp(p);
+    let best = null;
+    for (const m of p.monsters) {
+      if (m.acted) continue;
+      const mine = Math.floor(g.monsterPower(p, m) + 0.5);
+      for (const t of o.monsters) {
+        const theirs = Math.floor(g.monsterPower(o, t) + 0.5);
+        const kill = t.hpNow <= mine, die = m.hpNow <= theirs;
+        if ((die && !kill) || (!kill && theirs < mine)) continue;
+        const gain = theirs * 2 + (kill ? 5 : 0) - (die ? mine * 2 : 0);
+        if (gain > 0 && (!best || gain > best[0])) best = [gain, m.uid, t.uid];
+      }
+    }
+    return best ? ["mon", best[1], best[2]] : null;
+  },
   reserved(p) {
     const keep = new Set();
+    if (POLAR[p.hiou]) {   // 昼特化・夜特化：日蝕・月食用に指定カードを2枚まで温存（モンスターは出す）
+      const ids = [...p.designated.day, ...p.designated.night];
+      for (const c of p.hand.filter(c => ids.includes(c.id) && c.type !== "summon").slice(0, 2)) keep.add(c.uid);
+      return keep;
+    }
     if (!hiouOptions(p).length) return keep;
     for (const key of ["day", "night"]) {
       const c = p.hand.find(c => p.designated[key].includes(c.id));
@@ -1136,6 +1184,8 @@ const AI = {
   pick(g, p) {
     const o = g.opp(p), hand = p.hand.filter(c => !c.hidden);   // 裏向き（暗闇）のカードは中身が分からないので考えない
     const hidden = p.hand.filter(c => c.hidden);
+    const mon = this.monsterOrder(g, p);   // モンスター同士で殴り合う方が得なら
+    if (mon) return mon;
     // 奥義は使えるならすぐ溜める
     const now = hand.find(c => isOugi(c) && g.canPlay(p, c, "use"));
     if (now) return [now.uid, "use"];
@@ -1459,18 +1509,22 @@ function renderBars(key, p, pv = null) {
   bar("sh", p.shield, s1, R.SHIELD_CAP);
 }
 /* 盤面：デッキの山・モンスターの場（2枠）・ドロップゾーン。mons は選んでいる攻撃の見込み {uid: 残りHP} */
+let monSel = null;   // 指示を出そうとしている自分のモンスター（uid）
+function monReady(p, m) { return p === g.players[seat] && myTurnNow() && !m.acted; }
 function renderBoard(key, p, mons = null) {
   const i = g.idx(p), o = g.opp(p);
   const aiming = i !== seat && selAiming();
+  const monAim = i !== seat && monSel != null;   // モンスターの狙い：相手のモンスターを押す
   const slots = Array.from({ length: R.MAX_MON }, (_, k) => {
     const m = p.monsters[k];
     if (!m) return `<div class="slot empty"><small>場</small></div>`;
     const per = g.incoming(o, g.outgoing(p, m.power, g.attrMult(m.attr, p)));
     const now = Math.max(0, m.hpNow), after = mons && m.uid in mons ? Math.max(0, mons[m.uid]) : now;
     const a = now / m.hp * 100, b = after / m.hp * 100;
-    return `<div class="slot mon a-${m.attr}${m.art ? ` art-${m.art}` : ""}${aiming ? " aimable" : ""}${aiming && sel.target === m.uid ? " aimed" : ""}" data-mon="${m.uid}"${aiming ? ` data-aim="${m.uid}"` : ""}>
+    const ready = monReady(p, m);
+    return `<div class="slot mon a-${m.attr}${m.art ? ` art-${m.art}` : ""}${aiming || monAim ? " aimable" : ""}${aiming && sel.target === m.uid ? " aimed" : ""}${ready ? " ready" : ""}${m.acted && i === g.turnIdx ? " acted" : ""}${monSel === m.uid ? " chosen" : ""}" data-mon="${m.uid}"${aiming ? ` data-aim="${m.uid}"` : ""}${monAim ? ` data-mtarget="${m.uid}"` : ""}${ready ? ` data-mpick="${m.uid}"` : ""}>
       <b class="m-name">${m.name}</b>
-      <span class="m-atk" title="ターン終了時に相手を攻撃">攻${per}</span>
+      <span class="m-atk" title="${i === seat ? "押すと攻撃の指示（押さなければターン終了時に相手を攻撃）" : "ターン終了時に相手を攻撃"}">攻${per}</span>
       <div class="bar mbar"><i class="mhp" style="width:${Math.min(a, b)}%"></i><b class="gh mhp${b < a ? " loss" : ""}" style="left:${b}%;width:${Math.max(0, a - b)}%"></b></div>
       <small class="m-hp">HP ${now === after ? `${now}/${m.hp}` : `${now}→<b class="down">${after}</b>${after === 0 ? " 破壊" : ""}`}</small>
     </div>`;
@@ -1630,6 +1684,16 @@ function guideHTML(me) {
     return row(`<span class="turn-chip">${g.pending.seat === seat ? "鏡花水月：跳ね返すか選ぼう" : `${nameOf(g.pending.seat)}が鏡花水月を使うか選んでいる…`}</span>`);
   if (g.turnIdx !== seat)
     return row(`<span class="turn-chip foe">${nameOf(1 - seat)}のターン</span><span class="act-hint">${mode === "ai" ? "行動中…" : "相手の操作を待っている"}</span>`);
+  const ms = monSel != null && me.monsters.find(m => m.uid === monSel);
+  if (ms && !ms.acted) {   // モンスターの指示：狙いを選ぶ
+    const o = g.opp(me), mine = Math.floor(g.monsterPower(me, ms) + 0.5);
+    const face = Math.floor(g.incoming(o, g.monsterPower(me, ms)) + 0.5);
+    const btns = [`<button class="btn small" data-act="monatk" data-m="${ms.uid}" data-t="">${nameOf(1 - seat)}を攻撃（${face}ダメージ）</button>`,
+      ...o.monsters.map(t => { const back = Math.floor(g.monsterPower(o, t) + 0.5);
+        return `<button class="btn small" data-act="monatk" data-m="${ms.uid}" data-t="${t.uid}">${t.name}を攻撃（${mine}を与えて${back}を受ける${t.hpNow <= mine ? "・倒せる" : ""}${ms.hpNow <= back ? "・こちらも倒れる" : ""}）</button>`; })];
+    return `<div class="pairs"><span class="act-hint"><b>${ms.name}</b>で攻撃：相手を選ぶ（相手のモンスターを押してもいい）</span>${btns.join("")}<button class="btn small sub" data-act="moncancel">やめる</button></div>`;
+  }
+  monSel = null;
   if (selectedCard()) return selGuideHTML(me);
   const lim = playLimit(me), left = Math.max(0, lim - (me.plays || 0));
   const pips = `<span class="plays" title="このターンに使える残りの枚数（使う・回復・奥義）"><span class="pip-row">${"●".repeat(left)}${"○".repeat(lim - left)}</span><small>${left ? `あと${left}枚` : "使い切った"}${me.numb ? "（痺れ）" : ""}${me.kageuchi ? "（影討ち）" : ""}</small></span>`;
@@ -2048,6 +2112,7 @@ async function runAITurn(id) {
     const a = AI.pick(g, p);
     if (!a) break;
     const ok = a[0] === "pair" ? g.playPair(p, a[1], a[2]) : a[0] === "trio" ? g.playTrio(p, a[1]) : a[0] === "newmoon" ? g.newMoon(p)
+      : a[0] === "mon" ? g.monsterAttack(p, a[1], a[2])
       : g.play(p, a[0], a[1], a[1] === "use" ? AI.chooseTarget(g, p, p.hand.find(c => c.uid === a[0])) : null);
     if (!ok) break;   // 使えないカードを選んだら、そのターンは終える（止まらないように）
     render();
@@ -2087,6 +2152,7 @@ function humanPlay(uid, m, target = null) {
   if (g.play(me, uid, m, target)) return afterMyAction();
   if (c?.hidden) { g.log(`裏向きのカードは${m === "use" ? "今は使えない" : "回復に回せない"}カードだった`, "warn"); render(); }   // 暗闇：使えないカードだったと分かる
 }
+function humanMon(uid, tuid) { monSel = null; if (myTurnNow() && g.monsterAttack(g.players[seat], uid, tuid)) afterMyAction(); else render(); }
 function humanPair(d, n) { if (myTurnNow() && g.playPair(g.players[seat], d, n)) afterMyAction(); }
 function humanTrio(uids) { if (myTurnNow() && g.playTrio(g.players[seat], uids)) afterMyAction(); }
 function humanNewMoon() { if (myTurnNow() && g.newMoon(g.players[seat])) afterMyAction(); }
@@ -2419,11 +2485,15 @@ function choose(uid, m) {
 document.addEventListener("click", e => {
   const b = e.target.closest("button");
   if (!b) {
+    const mt = e.target.closest("[data-mtarget]");   // モンスターの指示：相手のモンスターを押すと攻撃
+    if (mt && monSel != null) { humanMon(monSel, +mt.dataset.mtarget); return; }
+    const mp = e.target.closest("[data-mpick]");   // 自分のモンスターを押す：指示を出す／もう一度押すとやめる
+    if (mp && myTurnNow()) { const u = +mp.dataset.mpick; monSel = monSel === u ? null : u; sel = null; render(); return; }
     const aim = e.target.closest("[data-aim]");   // 攻撃を選んでいるとき、相手のモンスターを押すとそちらを狙う
     if (aim && sel) { sel.target = sel.target === +aim.dataset.aim ? null : +aim.dataset.aim; render(); return; }
     // カードの本体を押す：浮かせる／もう一度押すと戻す
     const card = e.target.closest("[data-pick]");
-    if (card && myTurnNow()) { const uid = +card.dataset.pick; sel = sel?.uid === uid ? null : { uid, mode: null }; render(); }
+    if (card && myTurnNow()) { const uid = +card.dataset.pick; sel = sel?.uid === uid ? null : { uid, mode: null }; monSel = null; render(); }
     return;
   }
   const act = b.dataset.act;
@@ -2434,6 +2504,8 @@ document.addEventListener("click", e => {
   else if (act === "aim") { if (sel) { sel.target = b.dataset.t ? +b.dataset.t : null; render(); } }
   else if (act === "drop") showDrop(+b.dataset.seat);
   else if (act === "pair") humanPair(+b.dataset.d, +b.dataset.n);
+  else if (act === "monatk") humanMon(+b.dataset.m, b.dataset.t ? +b.dataset.t : null);
+  else if (act === "moncancel") { monSel = null; render(); }
   else if (act === "trio") humanTrio(b.dataset.u.split(",").map(Number));
   else if (act === "newmoon") humanNewMoon();
   else if (act === "end") endMyTurn();
