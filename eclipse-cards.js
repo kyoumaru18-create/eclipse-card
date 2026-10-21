@@ -117,7 +117,6 @@ const CARDS = {
   drain:    { name: "吸血",       attr: "night", type: "attack",  power: 6, drain: true, cost: 4, recover: 4 },
   jab:      { name: "突き",       attr: "day",   type: "attack",  power: 3, cost: 2, recover: 2 },
   recoil:   { name: "捨て身",     attr: "night", type: "attack",  power: 12, recoil: 3, cost: 4, recover: 4 },
-  eclipse:  { name: "日蝕",       attr: "none",  type: "attack",  power: 6, eclipse: true, cost: 4, recover: 4 },
   needle:   { name: "毒針",       attr: "night", type: "poison",  power: 5, sleep: 1, cost: 3, recover: 3 },
   bleed:    { name: "裂傷",       attr: "night", type: "bleed",   power: 3, numbing: 1, cost: 3, recover: 3 },
   counter:  { name: "反撃の構え", attr: "day",   type: "counter", cost: 3, recover: 3 },
@@ -180,9 +179,9 @@ const CARDS = {
 /* 見本デッキ（cards.json の decks と同じ） */
 const PRESETS = {
   sun: { name: "昼特化", cards: {
-    strike: 3, bomb: 3, sunwolf: 3, eclipse: 2, jab: 3, sunturn: 2, twilight: 2, zanshou: 3, nichirin: 3, regen: 3, heal: 3, firstaid: 2, amaterasu: 4 } },
+    strike: 3, bomb: 3, sunwolf: 3, jab: 3, sunturn: 2, twilight: 3, zanshou: 3, nichirin: 3, regen: 3, heal: 3, firstaid: 3, amaterasu: 4 } },
   moon: { name: "夜特化", cards: {
-    slash: 3, ambush: 3, nightowl: 3, drain: 3, eclipse: 2, moonturn: 2, twilight: 3, oborozuki: 3, shingetsu: 3, bleed: 3, gassho: 1, firstaid: 3, tsukuyomi: 4 } },
+    slash: 3, ambush: 3, nightowl: 3, drain: 3, moonturn: 2, twilight: 3, oborozuki: 3, shingetsu: 3, bleed: 3, gassho: 1, needle: 2, firstaid: 3, tsukuyomi: 4 } },
   venom: { name: "状態異常", cards: {
     needle: 3, bleed: 3, drain: 3, fang: 3, metsubushi: 2, corrode: 1, bloom: 2, mushibami: 3, dokugumo: 2, dokugiri: 2, koromo: 2, counter: 1, firstaid: 3, heal: 2, kodoku: 4 } },
   counter: { name: "カウンター", cards: {
@@ -199,11 +198,20 @@ const DECK = PRESETS[DEFAULT_PRESET].cards;
 function deckSize(def) { return Object.values(def).reduce((a, b) => a + b, 0); }
 function maxCopies(id) { return isOugi(CARDS[id]) ? R.BUDDHA_MAX : R.MAX_COPIES; }
 /* 外から来たデッキ（保存データ・相手のデッキ）を安全な形に直す。おかしければ標準デッキ */
+/* なくなったカード → かわりに入れるカード（保存してあるデッキの枚数が減らないように） */
+const REMOVED_CARDS = { eclipse: ["twilight", "firstaid", "heal", "strike", "slash"] };
 function sanitizeDeck(def) {
-  const out = {};
+  const out = {}, lost = [];
   if (def && typeof def === "object")
-    for (const [id, n] of Object.entries(def))
-      if (CARDS[id] && Number.isInteger(n) && n > 0) out[id] = Math.min(n, maxCopies(id));
+    for (const [id, n] of Object.entries(def)) {
+      if (!Number.isInteger(n) || n <= 0) continue;
+      if (CARDS[id]) out[id] = Math.min(n, maxCopies(id));
+      else if (REMOVED_CARDS[id]) lost.push([REMOVED_CARDS[id], n]);
+    }
+  for (const [subs, n0] of lost) {   // 足りない枚数を、かわりのカードで上限まで埋める
+    let n = n0;
+    for (const id of subs) { const k = Math.min(n, maxCopies(id) - (out[id] || 0)); if (k > 0) { out[id] = (out[id] || 0) + k; n -= k; } }
+  }
   const size = deckSize(out);
   return size === R.DECK_SIZE ? out : { ...DECK };
 }
@@ -1655,7 +1663,7 @@ function render() {
   $("phaseName").textContent = `第${g.round}巡　${PHASE_JP[g.phase]}${myPolar ? `（あなたの場は${myPolar.name}）` : ""}`;
   const [k, nxt] = g.roundsToTransition();
   const esc = g.escalation();
-  $("phaseInfo").textContent = (k === 0 ? "秘奥のチャンス・日蝕が2倍" : `次の${PHASE_JP[nxt]}まであと${k}巡${g.phase === "day" || g.phase === "night" ? `　${PHASE_JP[g.phase]}のカードが1.5倍` : ""}`)
+  $("phaseInfo").textContent = (k === 0 ? "秘奥のチャンス" : `次の${PHASE_JP[nxt]}まであと${k}巡${g.phase === "day" || g.phase === "night" ? `　${PHASE_JP[g.phase]}のカードが1.5倍` : ""}`)
     + (esc > 1 ? `　日蝕の深まり：全ダメージ×${esc}` : "");
 
   const rects = captureRects();   // 動きの演出用：描き直す前のカードの位置
