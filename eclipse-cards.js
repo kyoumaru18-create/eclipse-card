@@ -7,7 +7,7 @@ const R = {
   WRATH_AT: 3, FINISH_AT: 4, FINISH_DMG: 18, WAIT_BONUS: 2, WRATH_REDUCE: 7, WRATH_DRAW: 2, MAX_ROUNDS: 40,
   ESCALATION: 0.5,   // 日蝕の深まり：昼夜が1周するごとに与えるダメージ+50%（膠着して終わらない試合を防ぐ）
   OUGI_AT: 4,        // 奥義（仏の怒りを含む）：この枚数目を使うと必殺技
-  AMATERASU_DMG: 10, TSUKUYOMI_DMG: 10, KODOKU_POISON: 8, KODOKU_MULT: 3, KYOKA_MULT: 1.5,
+  AMATERASU_DMG: 10, TSUKUYOMI_DMG: 10, KODOKU_POISON: 12, KODOKU_MULT: 3, KYOKA_MULT: 1.5,
   DECK_SIZE: 36, MAX_COPIES: 3, BUDDHA_MAX: 4,   // デッキはちょうど36枚。同じカードは3枚まで（奥義は4枚まで）
   KYOKA_CUT: 0.15,   // 鏡花水月を溜めている間、k枚ごとに受ける攻撃をこの割合ずつ減らす（受けた攻撃の半分を返す）
   KARMA_MULT: 1.5,   // 因果応報：溜めた特殊ダメージをこの倍率で、相手のHPに直接返す
@@ -24,6 +24,8 @@ const TYPE_JP = { attack: "攻撃", heal: "HP回復", poison: "毒", bleed: "出
 const MONSTER_EXPECT = 3;   // モンスターが倒されるまでに攻撃する回数の目安（AIの見積もり用）
 const REVENGE_RATE = 0.5;   // 報復：前の相手ターンに受けたダメージのこの割合を上乗せ
 const BLOOD = { SHURA_HEAL: 10, SHURA_MULT: 1.25, RAGE_STEP: 4 };   // 自傷デッキ用（修羅の回復量・倍率、狂血の増え方）
+/* パックの奥義の数値（engine.py と同じ） */
+const NEW_OUGI = { GYOKUTO_DMG: 16, GYOKUTO_CHARGE: 1, NEHAN_HEAL: 20, NEHAN_CHARGE: 1, MEIKYO_CHARGE: 3, MEIKYO_CUT: 5, CHIMATSURI_CHARGE: 2 };
 /* 奥義：4枚溜めると必殺技（同じ奥義は1ターン1枚） */
 /* charge(k)：k枚（1〜3）溜めている間の効果。4枚目で必殺技を撃つとリセット */
 const OUGI = {
@@ -35,12 +37,25 @@ const OUGI = {
   kyoka:     { name: "鏡花水月", desc: "相手の攻撃カードを1回だけ1.5倍にして跳ね返せる（受けるときに選ぶ）",
                charge: k => `受ける攻撃-${Math.round(R.KYOKA_CUT * k * 100)}%・受けた半分を返す` },
   shura:     { name: "修羅",     desc: "HP10回復＋以降、HPを払うカードのダメージが1.25倍", charge: k => `HPを払うカードのダメージ+${k}` },
+  /* ここから下はカードパックで手に入る奥義 */
+  kinu:      { name: "金烏",     desc: "陽光+2＋そのターンは影討ち（使えるカード3枚・与えるダメージ2倍）", charge: k => `昼カードを使うたびシールド+${k}` },
+  gyokuto:   { name: "玉兎",     desc: `${NEW_OUGI.GYOKUTO_DMG}ダメージ＋相手の手札を1枚捨てさせる`, charge: k => `相手のターンの始めに相手のシールド-${NEW_OUGI.GYOKUTO_CHARGE * k}` },
+  ekishin:   { name: "疫神",     desc: "相手の毒を2倍にする", charge: k => `毒を与えるたび毒+${k}` },
+  meikyo:    { name: "明鏡止水", desc: "次の自分のターンまで、受ける攻撃を0にしてそのまま返す",
+               charge: k => `受ける攻撃-${NEW_OUGI.MEIKYO_CUT * k}・反撃の構えで返す量+${NEW_OUGI.MEIKYO_CHARGE * k}` },
+  nehan:     { name: "涅槃",     desc: `HP+${NEW_OUGI.NEHAN_HEAL}＋毒と出血を治す`, charge: k => `毎ターンHP+${NEW_OUGI.NEHAN_CHARGE * k}` },
+  chimatsuri:{ name: "血祭り",   desc: "減っているHPの半分を相手に与える", charge: k => `HPを払うたび相手のHPに直接${NEW_OUGI.CHIMATSURI_CHARGE * k}` },
 };
 /* このターンに使えるカードの枚数（痺れていれば減る。最低1枚） */
 function playLimit(p) { return Math.max(1, (p.kageuchi ? KAGEUCHI_LIMIT : R.PLAY_LIMIT) - (p.numb || 0)); }
 function charge(p, key) { return (p.stacks?.[key] || []).length; }
 /* 昼は、毒のダメージが半分・毒の減り方が2倍（engine.py と同じ） */
 const DAY_POISON_CUT = 0.5, DAY_POISON_DECAY = 2, NIGHT_POISON_MULT = 1;
+/* モンスターの特徴 */
+function monExtra(c) {
+  return (c.mpoison ? `・当たると毒${c.mpoison}` : "") + (c.mthorn ? `・場にいる間、あなたが攻撃されるたび${c.mthorn}返す` : "")
+    + (c.mzeal ? "・仏の怒りの溜め1つごとに攻撃+1" : "") + (c.mdrain ? `・攻撃するたびHP+${c.mdrain}` : "") + (c.hpcost ? `・HPを${c.hpcost}払う` : "");
+}
 function isOugi(c) { return c.type === "buddha" || c.type === "ougi"; }
 /* 秘奥：日没・夜明けに昼と夜の指定カードを同時に使うと1つ選べる。選べる候補はデッキのタイプで変わる */
 const BUFFS = {
@@ -83,7 +98,8 @@ const HIOU_NAME = { day: "白夜", night: "極夜", balanced: "蝕の秘奥", ve
 const HIOU_LEAN = 4;   // 昼（夜）カードが夜（昼）カードよりこの枚数以上多ければ昼寄り（夜寄り）
 /* デッキのタイプ。蠱毒→毒、鏡花水月→カウンター、修羅→自傷、天照→昼、月読→夜。それ以外は昼と夜のカードの枚数で決まる */
 function deckType(def) {
-  const map = [["kodoku", "venom"], ["kyoka", "counter"], ["shura", "blood"], ["amaterasu", "day"], ["tsukuyomi", "night"]];
+  const map = [["kodoku", "venom"], ["kyoka", "counter"], ["shura", "blood"], ["amaterasu", "day"], ["tsukuyomi", "night"],
+               ["ekishin", "venom"], ["meikyo", "counter"], ["chimatsuri", "blood"], ["kinu", "day"], ["gyokuto", "night"]];
   for (const [id, kind] of map) if (def[id] > 0) return kind;
   let day = 0, night = 0;
   for (const [id, n] of Object.entries(def)) { if (CARDS[id].attr === "day") day += n; else if (CARDS[id].attr === "night") night += n; }
@@ -121,7 +137,7 @@ const CARDS = {
   revenge:  { name: "報復",     attr: "night", type: "attack",  power: 4, revenge: true, cost: 3, recover: 3 },
   thorns:   { name: "棘の鎧",   attr: "night", type: "thorns",  power: 3, turns: 3, cost: 3, recover: 4 },
   metsubushi: { name: "目潰し", attr: "day",   type: "attack",  power: 3, blind: 2, cost: 2, recover: 2 },
-  fang:     { name: "毒牙",     attr: "day",   type: "attack",  power: 4, poison: 2, numbing: 1, cost: 3, recover: 3 },
+  fang:     { name: "毒牙",     attr: "day",   type: "attack",  power: 4, poison: 3, numbing: 1, cost: 3, recover: 3 },
   corrode:  { name: "腐食",     attr: "night", type: "corrode", cost: 2, recover: 3 },
   bloom:    { name: "毒の開花", attr: "day",   type: "bloom",   cost: 3, recover: 3 },
   mushibami:   { name: "蝕み",     attr: "night", type: "linger",  power: 1, turns: 3, cost: 3, recover: 3 },
@@ -145,8 +161,18 @@ const CARDS = {
   zazen:    { name: "座禅",     attr: "day",   type: "heal",    power: 4, cure: true, wrathok: true, cost: 0, recover: 2 },
   fudoushin:{ name: "不動心",   attr: "night", type: "calm",    wrathok: true, cost: 2, recover: 3 },
   dokugiri: { name: "毒霧",     attr: "day",   type: "poison",  power: 4, cost: 2, recover: 3 },
-  koromo:   { name: "毒の衣",   attr: "night", type: "koromo",  power: 3, cut: 3, turns: 3, cost: 1, recover: 3 },
+  koromo:   { name: "毒の衣",   attr: "night", type: "koromo",  power: 3, cut: 5, turns: 3, cost: 1, recover: 3 },
   machi:    { name: "待ちの構え", attr: "day", type: "wait",    cost: 2, recover: 3 },
+  dokugumo: { name: "毒蜘蛛",   attr: "night", type: "summon",  power: 2, hp: 8, mpoison: 3, cost: 3, recover: 4 },
+  monban:   { name: "門番",     attr: "day",   type: "summon",  power: 2, hp: 12, mthorn: 2, cost: 5, recover: 5 },
+  niou:     { name: "仁王",     attr: "day",   type: "summon",  power: 3, hp: 10, mzeal: true, cost: 5, recover: 5 },
+  koumori:  { name: "血の蝙蝠", attr: "night", type: "summon",  power: 2, hp: 6, mdrain: 1, hpcost: 3, cost: 3, recover: 4 },
+  kinu:     { name: "金烏",     attr: "none",  type: "ougi",    cost: 0, recover: 0 },
+  gyokuto:  { name: "玉兎",     attr: "none",  type: "ougi",    cost: 0, recover: 0 },
+  ekishin:  { name: "疫神",     attr: "none",  type: "ougi",    cost: 0, recover: 0 },
+  meikyo:   { name: "明鏡止水", attr: "none",  type: "ougi",    cost: 0, recover: 0 },
+  nehan:    { name: "涅槃",     attr: "none",  type: "ougi",    cost: 0, recover: 0 },
+  chimatsuri: { name: "血祭り", attr: "none",  type: "ougi",    cost: 0, recover: 0 },
   berserk:  { name: "狂乱",     attr: "night", type: "berserk", turns: 3, cost: 2, recover: 3 },
   dohatsu:  { name: "怒髪天",   attr: "night", type: "dohatsu", power: 2, turns: 3, wrathok: true, cost: 2, recover: 3 },
   shura:   { name: "修羅",       attr: "none",  type: "ougi",    cost: 0, recover: 0 },
@@ -158,13 +184,13 @@ const PRESETS = {
   moon: { name: "夜特化", cards: {
     slash: 3, ambush: 3, nightowl: 3, drain: 3, eclipse: 2, moonturn: 2, twilight: 3, oborozuki: 3, shingetsu: 3, bleed: 3, gassho: 1, firstaid: 3, tsukuyomi: 4 } },
   venom: { name: "状態異常", cards: {
-    needle: 3, bleed: 3, drain: 3, fang: 3, metsubushi: 2, corrode: 1, bloom: 2, ambush: 1, mushibami: 3, dokugiri: 2, koromo: 2, counter: 2, firstaid: 3, heal: 2, kodoku: 4 } },
+    needle: 3, bleed: 3, drain: 3, fang: 3, metsubushi: 2, corrode: 1, bloom: 2, mushibami: 3, dokugumo: 2, dokugiri: 2, koromo: 2, counter: 1, firstaid: 3, heal: 2, kodoku: 4 } },
   counter: { name: "カウンター", cards: {
-    counter: 3, parry: 3, revenge: 3, thorns: 2, kyoka: 4, karma: 3, strike: 3, slash: 3, kamaenaoshi: 2, machi: 2, drain: 2, heal: 3, firstaid: 3 } },
+    counter: 3, parry: 3, revenge: 3, thorns: 2, kyoka: 4, karma: 3, strike: 2, slash: 2, monban: 2, kamaenaoshi: 2, machi: 2, drain: 2, heal: 3, firstaid: 3 } },
   buddha: { name: "仏の怒り", cards: {
-    buddha: 4, sutra: 2, gassho: 2, kongo: 2, zazen: 2, fudoushin: 2, dohatsu: 2, counter: 3, heal: 3, firstaid: 3, katsu: 2, nembutsu: 2, slash: 2, ambush: 1, drain: 2, needle: 2 } },
+    buddha: 4, sutra: 2, gassho: 2, kongo: 2, zazen: 2, fudoushin: 2, dohatsu: 2, counter: 3, heal: 3, firstaid: 3, katsu: 2, nembutsu: 2, slash: 2, niou: 2, drain: 2, needle: 1 } },
   blood: { name: "自傷", cards: {
-    bloodblade: 3, bloodlust: 3, bloodshield: 3, regen: 3, recoil: 3, shura: 4, bloodpact: 2, backsplash: 2, bloodwaltz: 2, drain: 2, rengeki: 2, berserk: 2, heal: 2, firstaid: 3 } },
+    bloodblade: 3, bloodlust: 3, bloodshield: 3, regen: 3, recoil: 3, shura: 4, bloodpact: 2, backsplash: 2, bloodwaltz: 2, koumori: 2, rengeki: 2, berserk: 2, heal: 2, firstaid: 3 } },
 };
 const DEFAULT_PRESET = "buddha";   // 最初に使うデッキ。保存データがおかしいときもこれに戻す
 const DECK = PRESETS[DEFAULT_PRESET].cards;
@@ -258,7 +284,7 @@ function hiouOptions(p) { return HIOU_SETS[p.hiou || "balanced"].filter(b => !p.
 function stackOf(p, id) { return p.stacks[id] || []; }
 /* 仏の怒りの必殺技の基本ダメージ（怒り状態で待ったターンだけ増える） */
 /* 狂乱：その間は自分のデバフの数だけ攻撃+1（毒・出血はその量だけ）。返されるダメージ（反撃・鏡花水月・水月・棘の鎧）は2倍 */
-const BERSERK_REFLECT = 2, REFLECT_SOURCES = ["反撃", "鏡花水月", "水月", "棘の鎧", "迎え撃ち"];
+const BERSERK_REFLECT = 2, REFLECT_SOURCES = ["反撃", "鏡花水月", "水月", "棘の鎧", "迎え撃ち", "明鏡止水", "門番"];
 const WAIT_MULT = 2.5;   // 待ちの構え：次に受けたダメージをこの倍率で返す
 const DOHATSU_PER = 2;   // 怒髪天：受けたダメージこの量ごとに、必殺技+1・HP+1
 /* 自分についているデバフの数。毒は毒の量、出血は残りターン、ほか（眠り・痺れ・暗闇・蝕み）は1つ1（engine.py の debuffs と同じ） */
@@ -355,6 +381,7 @@ class Game {
   }
   incoming(t, a) {
     if (t.buffs.has("defense")) a *= R.DEF_BUFF;
+    a -= NEW_OUGI.MEIKYO_CUT * charge(t, "meikyo");   // 明鏡止水を溜めている間
     if (t.koromoTurns) a -= t.koromoCut || 0;   // 毒の衣
     if (t.hiou === "night") a -= REIDO_CUT * (t.polar || 0);   // 零度
     if (t.wrath) a -= R.WRATH_REDUCE;
@@ -399,6 +426,11 @@ class Game {
   }
   /* 受け手側の補正（防御強化・怒り状態）を計算済みのダメージを当てる */
   hit(t, amt, src, attacker = null) {
+    if (attacker && t.meikyo && amt > 0) {   // 明鏡止水：攻撃を0にして、そのまま返す
+      this.log(`${t.name}の明鏡止水：${src}を0にして返した`, "counter", this.idx(t));
+      this.dealDamage(attacker, amt, "明鏡止水");
+      return 0;
+    }
     if (attacker && t.parry && amt > 0) {   // 見切り：最初の攻撃を0にする
       t.parry = false;
       this.log(`${t.name}は${src}を見切った（ダメージ0）`, "counter", this.idx(t));
@@ -416,6 +448,7 @@ class Game {
       t.counter = false;
       const half = Math.floor(amt / 2);
       reflect = t.buffs.has("riposte") ? amt : half;   // 秘奥・返し刃なら全部返す
+      reflect += NEW_OUGI.MEIKYO_CHARGE * charge(t, "meikyo");   // 明鏡止水を溜めている間
       amt -= half;
     }
     const ab = Math.min(t.shield, amt);
@@ -451,9 +484,16 @@ class Game {
   /* 棘の鎧：攻撃を受けるたびに相手へダメージ（返したダメージには棘は反応しない） */
   thornsHit(t, attacker) {
     if (t.thornsTurns && !this.over) this.dealDamage(attacker, t.thorns * this.escalation(), "棘の鎧");
+    for (const m of [...t.monsters]) if (m.mthorn && !this.over) this.dealDamage(attacker, m.mthorn * this.escalation(), "門番");
   }
   /* 毒・出血を付ける */
+  /* 血祭りを溜めている間：HPを払うたび、相手のHPにも直接 */
+  bloodFeast(p) {
+    const k = NEW_OUGI.CHIMATSURI_CHARGE * charge(p, "chimatsuri");
+    if (k && !this.over) this.dotHit(this.opp(p), k, "血祭り");
+  }
   afflict(src, t, poison = 0, bleed = 0) {
+    if (poison && src !== t) poison += charge(src, "ekishin");   // 疫神を溜めている間：毒+k
     t.poison += poison; t.bleed += bleed;
     if (poison) this.log(`${t.name}に毒${poison}（合計${t.poison}）`);
     if (bleed) this.log(`${t.name}は出血した（${t.bleed}ターン、カードを使うたびHP-${R.BLEED_DMG}）`);
@@ -510,7 +550,7 @@ class Game {
     const paid = Math.min(p.shield, cost);
     p.shield -= paid;
     const s = cost - paid;
-    if (s) { p.hp -= s; p.hpPaidTurn = (p.hpPaidTurn || 0) + s; this.log(`シールド不足。${p.name}は${s}をHPで支払った`, "dmg", this.idx(p), s); this.checkDead(); }
+    if (s) { p.hp -= s; p.hpPaidTurn = (p.hpPaidTurn || 0) + s; this.log(`シールド不足。${p.name}は${s}をHPで支払った`, "dmg", this.idx(p), s); this.checkDead(); this.bloodFeast(p); }
   }
   draw(p, n) {
     for (let i = 0; i < n; i++) {
@@ -574,9 +614,11 @@ class Game {
     this.log(`${p.name}は${c.name}を使った${cost ? `（シールド-${cost}）` : ""}`, "play");
     this.payCost(p, cost);
     if (this.over) return;
+    if (charge(p, "kinu") && c.attr === "day") p.shield = Math.min(R.SHIELD_CAP, p.shield + charge(p, "kinu"));   // 金烏を溜めている間
     if (c.hpcost) {
       this.directHp(p, c.hpcost, "血の代償");
       p.hpPaidTurn = (p.hpPaidTurn || 0) + c.hpcost;
+      this.bloodFeast(p);
       if (this.over) return;
       if (p.buffs.has("bloodthirst")) p.shield = Math.min(R.SHIELD_CAP, p.shield + c.hpcost);   // 秘奥・血の渇き
     }
@@ -790,6 +832,31 @@ class Game {
       p.shura = true;
       this.heal(p, BLOOD.SHURA_HEAL, "修羅");
       this.log(`以降、${p.name}のHPを払うカードのダメージは${BLOOD.SHURA_MULT}倍`, "buff");
+    } else if (key === "kinu") {
+      p.polar = (p.polar || 0) + 2; p.kageuchi = true;
+      this.log(`金烏：${p.name}は陽光+2（${p.polar}つ）。このターンは影討ち（使えるカード${KAGEUCHI_LIMIT}枚・与えるダメージ${KAGEUCHI_MULT}倍）`, "buff");
+    } else if (key === "gyokuto") {
+      this.log(`玉兎：${NEW_OUGI.GYOKUTO_DMG}ダメージ＋${o.name}の手札を1枚捨てさせる`, "buff");
+      this.dealDamage(o, this.outgoing(p, NEW_OUGI.GYOKUTO_DMG, 1), "玉兎", p);
+      if (o.hand.length && !this.over) {
+        const c = o.hand.splice(Math.floor(Math.random() * o.hand.length), 1)[0];
+        o.drop.push(c); delete c.hidden;
+        this.log(`${o.name}は${c.name}を捨てた`);
+      }
+    } else if (key === "ekishin") {
+      this.log(`疫神：${o.name}の毒が2倍（${o.poison}→${o.poison * 2}）`, "buff");
+      o.poison *= 2;
+    } else if (key === "meikyo") {
+      p.meikyo = true;
+      this.log(`明鏡止水：次の${p.name}のターンまで、受ける攻撃を0にしてそのまま返す`, "buff");
+    } else if (key === "nehan") {
+      const b = p.hp;
+      p.hp = Math.min(R.MAX_HP, p.hp + NEW_OUGI.NEHAN_HEAL); p.poison = 0; p.bleed = 0;
+      this.log(`涅槃：${p.name}のHP ${b}→${p.hp}。毒と出血が治った`, "heal", this.idx(p), p.hp - b);
+    } else if (key === "chimatsuri") {
+      const n = Math.floor((R.MAX_HP - p.hp) / 2);
+      this.log(`血祭り：減っているHPの半分（${n}）を与える`, "buff");
+      if (n) this.dealDamage(o, this.outgoing(p, n, 1), "血祭り", p);
     } else if (key === "kyoka") {
       p.kyoka = true;
       this.log(`以降、${p.name}は相手の攻撃を1回だけ${R.KYOKA_MULT}倍にして跳ね返せる`, "buff");
@@ -889,7 +956,11 @@ class Game {
   beginTurn(p) {
     this.log(`第${this.round}巡【${PHASE_JP[this.phase]}】${p.name}のターン`, "turn");
     p.usedTurn = 0; p.hpPaidTurn = 0;
-    p.kageuchi = false;
+    p.kageuchi = false; p.meikyo = false;
+    const nk = NEW_OUGI.NEHAN_CHARGE * charge(p, "nehan");
+    if (nk && p.hp < R.MAX_HP) { p.hp = Math.min(R.MAX_HP, p.hp + nk); this.log(`涅槃：${p.name}はHP+${nk}`, "heal", this.idx(p), nk); }   // 涅槃を溜めている間
+    const gk = Math.min(p.shield, NEW_OUGI.GYOKUTO_CHARGE * charge(this.opp(p), "gyokuto"));
+    if (gk) { p.shield -= gk; this.log(`玉兎：${p.name}のシールド-${gk}`, "dmg", this.idx(p), gk); }   // 相手が玉兎を溜めている間
     p.ownTurns = (p.ownTurns || 0) + 1;
     const po = POLAR[p.hiou];
     if (po && p.ownTurns % POLAR_EVERY === 0) {
@@ -952,8 +1023,11 @@ class Game {
     const before = this.snap();
     for (const m of [...p.monsters]) {   // 場のモンスターが攻撃する（反撃の構え・棘の鎧で倒れることもある）
       if (!p.monsters.includes(m)) continue;
-      this.dealDamage(o, this.outgoing(p, m.power, this.attrMult(m.attr, p)), m.name, p);
+      const power = m.power + (m.mzeal ? charge(p, "buddha") : 0);   // 仁王：仏の怒りの溜め1つごとに+1
+      const dealt = this.dealDamage(o, this.outgoing(p, power, this.attrMult(m.attr, p)), m.name, p);
       if (this.over) return this.summary(`${p.name}の仲間の攻撃`, before);
+      if (m.mpoison && dealt) this.afflict(p, o, m.mpoison);   // 毒蜘蛛
+      if (m.mdrain && p.hp < R.MAX_HP) { p.hp = Math.min(R.MAX_HP, p.hp + m.mdrain); this.log(`${m.name}：${p.name}のHP+${m.mdrain}`, "heal", this.idx(p), m.mdrain); }   // 血の蝙蝠
     }
     this.summary(`${p.name}の仲間の攻撃`, before);
     if (p.bleed) p.bleed--;
@@ -1473,7 +1547,7 @@ function cardMain(p, c) {
   }
   if (c.type === "summon") {
     const per = g.incoming(g.opp(p), g.outgoing(p, c.power, g.attrMult(c.attr, p)));
-    return `<big class="${per > c.power ? "boost" : ""}">攻${per}</big>HP${c.hp}。場にコールし、ターン終了時に相手を攻撃。倒されるとドロップゾーンへ`;
+    return `<big class="${per > c.power ? "boost" : ""}">攻${per}</big>HP${c.hp}。場にコールし、ターン終了時に相手を攻撃${monExtra(c)}。倒されるとドロップゾーンへ`;
   }
   const k = stackOf(p, c.id).length, next = k + 1;
   const hint = next >= R.OUGI_AT ? `次で必殺技：${OUGI[c.id].desc.split("＋")[0]}`
@@ -1760,7 +1834,7 @@ function cardBrief(c, id = c.id) {   // カード一覧（CARDS）の中身に�
     case "counter": return `次に受ける攻撃を半分にし、半分を返す${c.draw ? "。1枚引く" : ""}`;
     case "bloodshield": return `HPを${c.hpcost}払ってシールド+${c.power}`;
     case "regen": return `${c.turns}ターンの間、毎ターンHP+${c.power}`;
-    case "summon": return `場にコール：攻撃${c.power}・HP${c.hp}（ターン終了時に攻撃。倒されるとドロップゾーンへ）`;
+    case "summon": return `場にコール：攻撃${c.power}・HP${c.hp}（ターン終了時に攻撃${monExtra(c)}。倒されるとドロップゾーンへ）`;
     case "buddha": case "ougi": return `溜めている間：${[1, 2, 3].map(k => OUGI[id]?.charge(k)).join(" → ")}。${R.OUGI_AT}枚目で必殺技：${OUGI[id]?.desc || ""}`;
   }
   return "";
