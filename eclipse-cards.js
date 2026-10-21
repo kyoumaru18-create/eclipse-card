@@ -196,7 +196,7 @@ const PRESETS = {
   buddha: { name: "仏の怒り", cards: {
     buddha: 4, sutra: 2, gassho: 2, kongo: 2, zazen: 2, fudoushin: 2, dohatsu: 2, counter: 3, heal: 3, firstaid: 3, katsu: 2, nembutsu: 2, slash: 2, niou: 2, drain: 2, needle: 1 } },
   blood: { name: "自傷", cards: {
-    bloodblade: 3, bloodlust: 3, bloodshield: 3, regen: 3, recoil: 3, shura: 4, bloodpact: 2, backsplash: 2, hissen: 2, chizome: 2, koumori: 2, berserk: 2, heal: 2, firstaid: 3 } },
+    bloodblade: 3, bloodlust: 2, recoil: 3, hissen: 3, chizome: 3, backsplash: 3, bloodshield: 3, regen: 3, shura: 4, koumori: 2, berserk: 2, heal: 2, firstaid: 3 } },
 };
 const DEFAULT_PRESET = "buddha";   // 最初に使うデッキ。保存データがおかしいときもこれに戻す
 const DECK = PRESETS[DEFAULT_PRESET].cards;
