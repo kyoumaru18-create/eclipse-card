@@ -1810,7 +1810,10 @@ function render() {
   guide.classList.toggle("mine", myTurn);
   guide.classList.toggle("picking", !!sel);
 
-  $("deckInfo").textContent = `${me.hand.length}枚　デッキ残り${me.deck.length}`;
+  const open = handOpen || !!sel;   // 手札の引き出し：たたんでいるときは小さいタイル。カードを選んでいるときは開く
+  $("deckInfo").textContent = `${me.hand.length}枚　デッキ残り${me.deck.length}　${open ? "▼たたむ" : "▲開く"}`;
+  $("hand").classList.toggle("mini", !open);
+  document.body.classList.toggle("hand-mini", !open);
   $("hand").innerHTML = me.hand.map(c => {
     if (c.hidden) {   // 暗闇：中身は見せない。使えるかどうかも、使ってみるまで分からない
       const picked = sel?.uid === c.uid, armed = m => picked && sel.mode === m;
@@ -2539,6 +2542,11 @@ function rematch() {
   save();
 }
 
+/* ===== 手札の引き出し：たたむと名前と数字だけの小さいタイルになり、場が広がる（選んだ状態は覚えておく） ===== */
+let handOpen = true;
+try { handOpen = localStorage.getItem("eclipse-handopen") !== "0"; } catch {}
+function setHandOpen(v) { handOpen = v; try { localStorage.setItem("eclipse-handopen", v ? "1" : "0"); } catch {} }
+
 /* ===== クリック ===== */
 /* 1回目：そのカードを浮かせて、ゲージに見込みを出す。同じボタンをもう一度押すと決定 */
 function choose(uid, m) {
@@ -2556,6 +2564,7 @@ document.addEventListener("click", e => {
     tipEl.classList.toggle("open", openTips.has(k));
     return;
   }
+  if (e.target.closest(".hand-head")) { setHandOpen(!(handOpen || sel)); if (!handOpen) sel = null; render(); return; }
   const b = e.target.closest("button");
   if (!b) {
     const mt = e.target.closest("[data-mtarget]");   // モンスターの指示：相手のモンスターを押すと攻撃
@@ -2566,6 +2575,11 @@ document.addEventListener("click", e => {
     if (aim && sel) { sel.target = sel.target === +aim.dataset.aim ? null : +aim.dataset.aim; render(); return; }
     // カードの本体を押す：浮かせる／もう一度押すと戻す
     const card = e.target.closest("[data-pick]");
+    if (card && !handOpen && !sel) {   // たたんでいる手札のタイルを押す：開いて、そのカードを持ち上げる
+      setHandOpen(true);
+      if (myTurnNow()) { sel = { uid: +card.dataset.pick, mode: null }; monSel = null; }
+      render(); return;
+    }
     if (card && myTurnNow()) { const uid = +card.dataset.pick; sel = sel?.uid === uid ? null : { uid, mode: null }; monSel = null; render(); }
     return;
   }

@@ -450,6 +450,15 @@ button.st, button.stack { font: inherit; text-align: left; cursor: pointer; }
 #game .side { display: flex; flex-direction: column; }
 #game .side .board { flex: 1 1 auto; }
 #game .side .slot, #game .side .pile { min-height: 84px; }
+/* 手札の引き出し：たたむと名前と数字だけの小さいタイルになる */
+.hand-head { cursor: pointer; user-select: none; }
+.hand.mini { padding-top: 10px; }
+.hand.mini .card { width: 76px; padding: 6px 7px 6px; gap: 2px; cursor: pointer; }
+.hand.mini .c-name { font-size: 13px; line-height: 1.15; }
+.hand.mini .c-main { font-size: 0; line-height: 0; }
+.hand.mini .c-main big { font-size: 20px; line-height: 1.1; }
+.hand.mini .c-main b, .hand.mini .c-main small { display: none; }
+.hand.mini .c-btns, .hand.mini .c-mark { display: none; }
 /* 手札の見出しは、カードの上に重ねて小さく（帯を低くする） */
 .dock section[aria-label="手札"] { position: relative; }
 .hand-head { position: absolute; right: 4px; top: -4px; z-index: 2; font-size: 11px; }
