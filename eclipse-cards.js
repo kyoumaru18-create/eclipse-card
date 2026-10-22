@@ -53,7 +53,7 @@ function charge(p, key) { return (p.stacks?.[key] || []).length; }
 const DAY_POISON_CUT = 0.5, DAY_POISON_DECAY = 2, NIGHT_POISON_MULT = 1;
 /* モンスターの特徴 */
 function monExtra(c) {
-  return (c.mpoison ? `・当たると毒${c.mpoison}` : "") + (c.mthorn ? `・場にいる間、あなたが攻撃されるたび${c.mthorn}返す` : "")
+  return (c.mpoison ? `・当たると毒${c.mpoison}` : "") + (c.mthorn ? `・攻撃されるたび${c.mthorn}返す` : "")
     + (c.mzeal ? "・仏の怒りの溜め1つごとに攻撃+1" : "") + (c.mdrain ? `・攻撃するたびHP+${c.mdrain}` : "") + (c.hpcost ? `・HPを${c.hpcost}払う` : "");
 }
 /* 1ターンに使える枚数に数えないカード（陽転・月転、モンスターのコール） */
@@ -1635,7 +1635,7 @@ function cardMain(p, c) {
     if (c.paralyze) extra += "＋相手を麻痺させる（次のターン、ドローできない）";
     if (c.allday && m === 1) extra += "昼でも夜でも1.5倍";
     if (c.zeal) extra += "＋仏の怒りの溜め×2";
-    if (c.paidbonus) extra += `（このターンに払ったHP${p.hpPaidTurn || 0}＋このカードの${c.hpcost}を足す）`;
+    if (c.paidbonus) extra += `払ったHP（今${p.hpPaidTurn || 0}＋${c.hpcost}）を足す`;
     if (c.fury) extra += `（このターン使った${p.usedTurn || 0}枚・払ったHP${p.hpPaidTurn || 0}で上がる）`;
     if (c.blind) extra += `＋相手を${c.blind}ターン暗闇（引いたカードが裏向き）`;
     if (c.attr === "both" && m === 1) extra += "昼でも夜でも1.5倍";
@@ -1657,15 +1657,15 @@ function cardMain(p, c) {
   if (c.type === "mimic") return `<big>0</big>次に受ける攻撃を0にして、攻撃してきた相手に毒${c.poison}`;
   if (c.type === "koromo") return `<big>-${c.cut}</big>自分に毒${c.power}。${c.turns}ターン、受ける攻撃-${c.cut}`;
   if (c.type === "wait") return `<big>×${WAIT_MULT}</big>ダメージを受けるまでドローできない。次に受けたダメージを${WAIT_MULT}倍で返す`;
-  if (c.type === "berserk") return `<big>+${debuffs(p)}</big>${c.turns}ターン、自分のデバフの数だけ攻撃+1（毒・出血はその量だけ）。ただし反撃などで返されるダメージは2倍`;
-  if (c.type === "dohatsu") return `<big>-${c.power}</big>${c.turns}ターン、受けるダメージが減り、受けたダメージ2ごとに必殺技+1・HP+1。<b>怒り状態でも使える</b>`;
+  if (c.type === "berserk") return `<big>+${debuffs(p)}</big>${c.turns}ターン、デバフの数だけ攻撃+1（毒は量の分）。返されるダメージは2倍`;
+  if (c.type === "dohatsu") return `<big>-${c.power}</big>${c.turns}ターン受けるダメージ減。受けた2ごとに必殺技+1・HP+1。<b>怒り状態でも使える</b>`;
   if (c.type === "linger") return `<big>${c.turns}</big>ターンの間、相手のターンの始めに毒${c.power}`;
   if (c.type === "sunshield") return `<big>+${c.power * (g.phaseFor(p) === "night" ? 2 : 1)}</big>シールド回復（夜は2倍）`;
   if (c.type === "shieldbreak") return `<big>-${c.power}</big>相手のシールドを削る`;
   if (c.type === "nembutsu") return `<big>+${c.power + 2 * charge(p, "buddha")}</big>シールド回復（仏の怒りの溜め×2を足す）`;
   if (c.type === "guard") return `<big>-${c.power}</big>次の自分のターンまで、受ける攻撃が全部減る${c.wrathok ? "。<b>怒り状態でも使える</b>" : ""}`;
   if (c.type === "parry") return `<big>0</big>次に受ける攻撃をダメージ0にする`;
-  if (c.type === "karma") return `<big>${c.turns}</big>ターンの間に受けた特殊ダメージ（毒・出血・蠱毒）を溜め、終わったら半分を回復し、${R.KARMA_MULT}倍にして相手のHPに直接返す`;
+  if (c.type === "karma") return `<big>${c.turns}</big>ターン受けた特殊ダメージを溜め、終わりに半分回復し${R.KARMA_MULT}倍で返す`;
   if (c.type === "thorns") return `<big>${c.power}</big>${c.turns}ターンの間、攻撃を受けるたび相手にダメージ`;
   if (c.type === "corrode") { const o = g.opp(p); return `<big>-${Math.min(o.shield, o.poison)}</big>相手の毒の量だけ相手のシールドを削る`; }
   if (c.type === "bloom") { const o = g.opp(p); return `<big>${Math.floor(o.poison * g.poisonMult(o) + 0.5)}</big>相手の毒を今すぐ全部HPに入れる（毒は0になる）`; }
@@ -1675,7 +1675,7 @@ function cardMain(p, c) {
   }
   if (c.type === "summon") {
     const per = g.incoming(g.opp(p), g.outgoing(p, c.power, g.attrMult(c.attr, p)));
-    return `<big class="${per > c.power ? "boost" : ""}">攻${per}</big>HP${c.hp}。場にコールし、ターン終了時に相手を攻撃${monExtra(c)}。倒されるとドロップゾーンへ。<b>使う枚数に数えない</b>`;
+    return `<big class="${per > c.power ? "boost" : ""}">攻${per}</big>HP${c.hp}。場に出す（<b>枚数に数えない</b>）${monExtra(c)}`;
   }
   const k = stackOf(p, c.id).length, next = k + 1;
   const hint = next >= R.OUGI_AT ? `次で必殺技：${OUGI[c.id].desc.split("＋")[0]}`
