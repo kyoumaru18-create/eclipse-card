@@ -1994,15 +1994,69 @@ function cardBrief(c, id = c.id) {   // カード一覧（CARDS）の中身に�
   return "";
 }
 
+/* ===== デッキ編集の画面（画面ごと切り替わる）===== */
+const dkf = { q: "", attrs: new Set(), types: new Set(), only: "", sort: "std" };   // 検索・絞り込みの状態
+const DK_TYPES = [["attack", "攻撃"], ["heal", "回復"], ["guard", "防御"], ["status", "状態異常"], ["summon", "モンスター"], ["support", "補助"], ["ougi", "奥義"]];
+const DK_ATTRS = [["day", "昼"], ["night", "夜"], ["both", "昼夜"], ["none", "無"]];
+/* カードのタイプ（複数に入る：毒牙＝攻撃＋状態異常） */
+function cardTags(c) {
+  const t = new Set();
+  if (isOugi(c)) { t.add("ougi"); return t; }
+  if (c.type === "attack") t.add("attack");
+  if (c.type === "summon") t.add("summon");
+  if (["heal", "regen"].includes(c.type) || c.drain || c.splash) t.add("heal");
+  if (["gassho", "sunshield", "nembutsu", "bloodshield", "guard", "parry", "counter", "thorns", "mimic", "dokumaku", "koromo", "wait", "calm", "dohatsu", "karma"].includes(c.type)) t.add("guard");
+  if (["poison", "bleed", "linger", "bloom", "corrode", "dokumaku", "mimic"].includes(c.type) || c.poison || c.numbing || c.paralyze || c.blind || c.sleep) t.add("status");
+  if (["draw", "sutra", "convert", "berserk", "shieldbreak", "karma"].includes(c.type)) t.add("support");
+  if (!t.size) t.add("support");
+  return t;
+}
+/* カードの顔に出す大きな数字 */
+function cardBig(c) {
+  switch (c.type) {
+    case "attack": return `${c.power}`;
+    case "heal": return `+${c.power}`;
+    case "regen": return `+${c.power}×${c.turns}`;
+    case "summon": return `攻${c.power} HP${c.hp}`;
+    case "gassho": case "sunshield": case "nembutsu": case "bloodshield": case "dokumaku": return `+${c.power}`;
+    case "guard": case "shieldbreak": return `-${c.power}`;
+    case "poison": return `毒${c.power}`;
+    case "bleed": return `出血${c.power}`;
+    case "linger": return `毒${c.power}×${c.turns}`;
+    case "koromo": case "dohatsu": return `-${c.cut || c.power}`;
+    case "draw": return `${c.power}枚`;
+    case "karma": case "berserk": return `${c.turns}T`;
+    case "wait": return `×${WAIT_MULT}`;
+    case "parry": case "mimic": return "0";
+    case "buddha": case "ougi": return "奥義";
+  }
+  return "";
+}
 function showDeckEditor() {
   draft = { name: myDeck.name, cards: { ...myDeck.cards }, designated: JSON.parse(JSON.stringify(myDeck.designated || {})) };
-  renderDeckEditor();
+  hideDialog();
+  setView("deck");
+  window.scrollTo(0, 0);
+  $("deckpage").innerHTML = `
+    <header class="dp-head">
+      <button class="btn sub small" data-act="menu">← 戻る</button>
+      <div class="dp-count"><b id="dp-size"></b><small>/ ${R.DECK_SIZE}枚</small></div>
+      <div class="dp-sum" id="dp-sum"></div>
+      <button class="btn small primary" data-act="dk-save" id="dp-save">保存して戻る</button>
+    </header>
+    <div class="dp-msgs" id="dp-msgs"></div>
+    <div class="dp-tools">
+      <input id="dp-q" type="search" placeholder="カード名・効果で検索" autocomplete="off" value="${dkf.q.replace(/"/g, "&quot;")}">
+      <div class="dp-chips" id="dp-chips"></div>
+      <div class="dp-presets"><span>見本を読み込む</span>
+        ${Object.entries(PRESETS).map(([k, pr]) => `<button class="btn sub small" data-act="dk-preset" data-p="${k}">${pr.name}</button>`).join("")}</div>
+    </div>
+    <div class="dp-found" id="dp-found"></div>
+    <div class="dp-grid" id="dp-grid"></div>`;
+  renderDeckPage();
 }
-function renderDeckEditor() {
-  const dlg = $("dialog");
-  const scroll = dlg.scrollTop;
-  const focus = document.activeElement?.dataset;
-  const focusKey = focus?.act ? `${focus.act}|${focus.id || focus.p || ""}` : "";
+function renderDeckPage() {
+  if (document.body.dataset.view !== "deck" || !draft) return;
   const def = draft.cards;
   const size = deckSize(def), probs = deckProblems(def), warns = deckWarnings(def);
   const byAttr = attr => Object.entries(def).filter(([id]) => CARDS[id].attr === attr && !isOugi(CARDS[id])).reduce((a, [, n]) => a + n, 0);
@@ -2010,50 +2064,68 @@ function renderDeckEditor() {
   const chosen = draft.designated || {};
   const finalDes = autoDesignated(def, chosen);   // 選んでいない分は自動で埋めた結果
   const desName = attr => finalDes[attr].map(id => `${CARDS[id].name}${(chosen[attr] || []).includes(id) ? "" : "（自動）"}`).join("・") || "なし";
+  const dt = deckType(def);
   const own = id => window.Meta ? Meta.owned(id) : maxCopies(id);   // 持っている枚数（ショップのカードパックで増える）
-  const row = (id, c) => {
-    const n = def[id] || 0;
-    const has = Math.min(own(id), maxCopies(id));
+
+  // 上の固定の帯
+  $("dp-size").textContent = size;
+  $("dp-size").className = probs.length ? "ng" : "ok";
+  $("dp-save").disabled = probs.length > 0;
+  $("dp-sum").innerHTML = `<span>昼${byAttr("day")}・夜${byAttr("night")}・無${byAttr("none")}・奥義${ougiCount}</span>
+    <span>${POLAR[dt] ? `<b>${POLAR[dt].name}</b>（${POLAR[dt].stack}・${POLAR[dt].trio}${dt === "night" ? "・新月" : ""}）` : `秘奥：<b>${HIOU_NAME[dt]}</b>（${HIOU_SETS[dt].map(b => BUFFS[b][0]).join("・")}）`}</span>
+    <span>指定カード　昼：${desName("day")}　夜：${desName("night")}</span>`;
+  $("dp-msgs").innerHTML = [...probs.map(t => `<p class="msg">${t}</p>`), ...warns.map(t => `<p class="msg warn">${t}</p>`)].join("")
+    + `<p class="dk-rule">★指定で、日没・夜明けの秘奥に使うカードを選べる。${R.DECK_SIZE}枚ちょうど、同じカードは${R.MAX_COPIES}枚まで（奥義は${R.BUDDHA_MAX}枚まで）。</p>`;
+
+  // 絞り込みのチップ
+  const chip = (act, v, label, on) => `<button class="dp-chip${on ? " on" : ""}" data-act="${act}" data-v="${v}" aria-pressed="${on}">${label}</button>`;
+  $("dp-chips").innerHTML = `
+    <div class="dp-row"><b>属性</b>${DK_ATTRS.map(([k, l]) => chip("dk-fa", k, l, dkf.attrs.has(k))).join("")}</div>
+    <div class="dp-row"><b>タイプ</b>${DK_TYPES.map(([k, l]) => chip("dk-ft", k, l, dkf.types.has(k))).join("")}</div>
+    <div class="dp-row"><b>表示</b>${[["", "すべて"], ["deck", "デッキに入っている"], ["own", "持っている"], ["lack", "持っていない"]].map(([k, l]) => chip("dk-fo", k, l, dkf.only === k)).join("")}
+      <label class="dp-sort">並び <select id="dp-sort">${[["std", "属性→種類"], ["cost", "消費の軽い順"], ["power", "数字の大きい順"], ["name", "名前順"], ["inDeck", "デッキの枚数順"]].map(([k, l]) => `<option value="${k}"${dkf.sort === k ? " selected" : ""}>${l}</option>`).join("")}</select></label></div>`;
+
+  // カード一覧
+  const q = dkf.q.trim().toLowerCase();
+  const attrOrder = { day: 0, night: 1, both: 2, none: 3 };
+  let list = Object.entries(CARDS).filter(([id, c]) => {
+    const n = def[id] || 0, has = Math.min(own(id), maxCopies(id));
+    if (dkf.attrs.size && !dkf.attrs.has(c.attr)) return false;
+    if (dkf.types.size && ![...cardTags(c)].some(t => dkf.types.has(t))) return false;
+    if (dkf.only === "deck" && !n) return false;
+    if (dkf.only === "own" && !has) return false;
+    if (dkf.only === "lack" && has) return false;
+    if (q && !`${c.name} ${TYPE_JP[c.type] || ""} ${cardBrief(c, id)} ${ATTR_JP[c.attr] || ""}`.toLowerCase().includes(q)) return false;
+    return true;
+  });
+  const key = {
+    std: ([, c]) => [isOugi(c) ? 9 : (attrOrder[c.attr] ?? 5), c.type, c.cost],
+    cost: ([, c]) => [c.cost, c.name], power: ([, c]) => [-(c.power || 0), c.name], name: ([, c]) => [c.name],
+    inDeck: ([id]) => [-(def[id] || 0), id],
+  }[dkf.sort];
+  list.sort((x, y) => { const a = key(x), b = key(y); for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1; return 0; });
+  $("dp-found").textContent = `${list.length} / ${Object.keys(CARDS).length} 種類を表示`;
+  $("dp-grid").innerHTML = list.map(([id, c]) => {
+    const n = def[id] || 0, has = Math.min(own(id), maxCopies(id));
     const canDes = (c.attr === "day" || c.attr === "night") && !isOugi(c);
     const isDes = canDes && (chosen[c.attr] || []).includes(id);
-    return `<div class="dk-row">
-      <div class="dk-info"><b>${c.name}</b><span class="dk-own${has ? "" : " none"}">所持${own(id)}</span><span>${TYPE_JP[c.type]}　${cardBrief(c, id)}</span><span class="dk-cost">消費${c.cost}／回復+${c.recover}</span></div>
-      ${canDes ? `<button class="dk-des${isDes ? " on" : ""}" data-act="dk-des" data-id="${id}" ${n ? "" : "disabled"} aria-pressed="${isDes}">★指定</button>` : ""}
-      <div class="dk-count">
-        <button class="dk-btn" data-act="dk-minus" data-id="${id}" ${n ? "" : "disabled"} aria-label="${c.name}を1枚減らす">−</button>
-        <output class="${n ? "" : "zero"}">${n}</output>
-        <button class="dk-btn" data-act="dk-plus" data-id="${id}" ${n >= has ? "disabled" : ""} aria-label="${c.name}を1枚増やす">＋</button>
+    const kind = isOugi(c) ? "奥義" : c.attr === "none" ? "無属性" : c.attr === "both" ? "昼夜" : `${ATTR_JP[c.attr]}属性`;
+    return `<div class="dk-card a-${c.attr} t-${c.type}${n ? " have" : ""}${has ? "" : " lack"}" data-id="${id}">
+      <div class="dkc-top"><span>${kind}・${TYPE_JP[c.type] || ""}</span><span class="dkc-own">${has ? `所持${own(id)}` : "未所持"}</span></div>
+      <div class="dkc-name">${c.name}</div>
+      <div class="dkc-big">${cardBig(c)}</div>
+      <div class="dkc-text">${cardBrief(c, id)}</div>
+      <div class="dkc-cost">${isOugi(c) ? "シールド消費なし" : `消費${c.cost}／回復+${c.recover}`}</div>
+      <div class="dkc-foot">
+        ${canDes ? `<button class="dk-des${isDes ? " on" : ""}" data-act="dk-des" data-id="${id}" ${n ? "" : "disabled"} aria-pressed="${isDes}">★指定</button>` : "<span></span>"}
+        <div class="dk-count">
+          <button class="dk-btn" data-act="dk-minus" data-id="${id}" ${n ? "" : "disabled"} aria-label="${c.name}を1枚減らす">−</button>
+          <output class="${n ? "" : "zero"}">${n}</output>
+          <button class="dk-btn" data-act="dk-plus" data-id="${id}" ${n >= has ? "disabled" : ""} aria-label="${c.name}を1枚増やす">＋</button>
+        </div>
       </div>
     </div>`;
-  };
-  const group = (attr, label) => `<h3 class="dk-group g-${attr}">${label}</h3>` +
-    Object.entries(CARDS).filter(([, c]) => (attr === "ougi" ? isOugi(c) : c.attr === attr && !isOugi(c))).map(([id, c]) => row(id, c)).join("");
-  const html = `<h2>デッキ編集</h2>
-    <div class="dk-presets"><span>見本から読み込む</span>
-      ${Object.entries(PRESETS).map(([k, p]) => `<button class="btn sub small" data-act="dk-preset" data-p="${k}">${p.name}</button>`).join("")}
-    </div>
-    <div class="dk-summary">
-      <b class="${probs.length ? "ng" : ""}">${size}枚</b>
-      <span>昼${byAttr("day")}・夜${byAttr("night")}・無${byAttr("none")}・奥義${ougiCount}</span>
-      <span>${POLAR[deckType(def)] ? `秘奥のかわりに：<b class="dk-type">${POLAR[deckType(def)].name}</b>（自分の場がずっと${PHASE_JP[deckType(def)]}。${POLAR[deckType(def)].stack}が溜まり、指定カード3枚で${POLAR[deckType(def)].trio}${deckType(def) === "night" ? "。12ターン目に新月" : ""}）`
-        : `秘奥：<b class="dk-type">${HIOU_NAME[deckType(def)]}</b>（${HIOU_SETS[deckType(def)].map(b => BUFFS[b][0]).join("・")}）`}</span>
-      <span>指定カード　昼：${desName("day")}　夜：${desName("night")}</span>
-    </div>
-    <p class="dk-rule">★指定で、日没・夜明けの秘奥に使うカードを昼2種・夜2種まで選べる（発動には昼1枚＋夜1枚）。選ばなかった分は枚数の多いカードが自動で入る。</p>
-    <p class="dk-rule">${R.DECK_SIZE}枚ちょうど。同じカードは${R.MAX_COPIES}枚まで（奥義は${R.BUDDHA_MAX}枚まで）。</p>
-    ${[...probs.map(t => `<p class="msg">${t}</p>`), ...warns.map(t => `<p class="msg warn">${t}</p>`)].join("")}
-    ${group("day", "昼属性：昼に1.5倍")}${group("night", "夜属性：夜に1.5倍")}${group("none", "無属性")}${group("ougi", `奥義：${R.OUGI_AT}枚溜めると必殺技`)}
-    <div class="join dk-foot">
-      <button class="btn" data-act="dk-save" ${probs.length ? "disabled" : ""}>保存して戻る</button>
-      <button class="btn sub" data-act="menu">保存せずに戻る</button>
-    </div>`;
-  if (dlg.dataset.kind === "deck") dlg.innerHTML = html; else showDialog(html, "deck");
-  dlg.scrollTop = scroll;
-  if (focusKey) {
-    const [act, key] = focusKey.split("|");
-    const el = [...dlg.querySelectorAll(`[data-act="${act}"]`)].find(b => (b.dataset.id || b.dataset.p || "") === key);
-    (el && !el.disabled ? el : dlg.querySelector("[data-act=dk-save]:not(:disabled), [data-act=menu]"))?.focus({ preventScroll: true });
-  }
+  }).join("") || `<p class="dp-empty">条件に合うカードがない</p>`;
 }
 function deckEdit(act, b) {
   if (act === "dk-plus" || act === "dk-minus") {
@@ -2070,6 +2142,11 @@ function deckEdit(act, b) {
     const cards = {};   // 持っていない分は入れない
     for (const [id, n] of Object.entries(p.cards)) { const k = Math.min(n, window.Meta ? Meta.owned(id) : n); if (k) cards[id] = k; }
     draft = { name: p.name, cards, designated: {} };
+  } else if (act === "dk-fa" || act === "dk-ft") {   // 属性・タイプの絞り込み（もう一度押すと外れる）
+    const set = act === "dk-fa" ? dkf.attrs : dkf.types, v = b.dataset.v;
+    if (set.has(v)) set.delete(v); else set.add(v);
+  } else if (act === "dk-fo") {
+    dkf.only = b.dataset.v;
   } else if (act === "dk-des") {   // 指定カードの選択・解除（各属性2種まで。3種目を選ぶと古い方が外れる）
     const id = b.dataset.id, attr = CARDS[id].attr;
     draft.designated ||= {};
@@ -2077,8 +2154,10 @@ function deckEdit(act, b) {
     if (list.includes(id)) draft.designated[attr] = list.filter(x => x !== id);
     else draft.designated[attr] = [...list, id].slice(-desMax(POLAR[deckType(draft.cards)] ? deckType(draft.cards) : null, attr));
   }
-  renderDeckEditor();
+  renderDeckPage();
 }
+document.addEventListener("input", e => { if (e.target.id === "dp-q") { dkf.q = e.target.value; renderDeckPage(); } });
+document.addEventListener("change", e => { if (e.target.id === "dp-sort") { dkf.sort = e.target.value; renderDeckPage(); } });
 
 /* ===== メニュー ===== */
 /* ===== ホーム画面（AI対戦・オンライン・デッキ編集・チュートリアル・設定） ===== */
@@ -2610,7 +2689,7 @@ document.addEventListener("click", e => {
   else if (act === "end") endMyTurn();
   else if (act === "close") hideDialog();
   else if (act === "deck") showDeckEditor();
-  else if (act === "dk-plus" || act === "dk-minus" || act === "dk-preset" || act === "dk-des") deckEdit(act, b);
+  else if (act === "dk-plus" || act === "dk-minus" || act === "dk-preset" || act === "dk-des" || act === "dk-fa" || act === "dk-ft" || act === "dk-fo") deckEdit(act, b);
   else if (act === "dk-save") { saveDeck(draft); showHome(`「${myDeck.name}」を保存した。次の試合から使われる。`, true); }
   else if (act === "ai") window.Meta ? Meta.askBet() : startAI();
   else if (act === "mkroom") createRoom();

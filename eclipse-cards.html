@@ -141,6 +141,9 @@ body::before {
 /* ホーム画面と盤面の切り替え */
 [data-view="home"] #game { display: none; }
 [data-view="game"] #home { display: none; }
+[data-view="deck"] #game, [data-view="deck"] #home { display: none; }
+.deckpage { display: none; }
+[data-view="deck"] .deckpage { display: block; }
 .home { max-width: 620px; margin: 0 auto; padding: 40px 16px 48px; display: grid; gap: 18px; }
 #homeMain { display: grid; gap: 14px; }
 #homeMain .msg:empty { display: none; }
@@ -710,6 +713,80 @@ div.prof-card { cursor: default; flex-wrap: wrap; }
 #game #side-me .board { grid-template-columns: minmax(0, 1fr); }
 #game #side-enemy .board { grid-template-columns: 52px minmax(0, 1fr) 44px; }
 @media (min-width: 700px) { #game #side-enemy .board { grid-template-columns: 64px minmax(0, 1fr) 54px; } .clock { width: 88px; height: 88px; } #game .top { min-height: 88px; padding-right: 100px; } }
+
+/* ===== デッキ編集の画面：カード型のタイルが並ぶ ===== */
+.deckpage { max-width: 1100px; margin: 0 auto; padding: 0 14px 60px; }
+.dp-head { position: sticky; top: 0; z-index: 20; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 8px 0; margin-inline: -14px; padding-inline: 14px;
+  background: var(--sky-top, #dfe9f1); border-bottom: 1px solid var(--line); backdrop-filter: blur(8px); }
+.dp-head .btn { flex: none; }
+.dp-count { display: flex; align-items: baseline; gap: 4px; font-variant-numeric: tabular-nums; }
+.dp-count b { font-family: var(--f-display); font-size: 28px; line-height: 1; }
+.dp-count b.ok { color: var(--good); } .dp-count b.ng { color: var(--bad); }
+.dp-count small { color: var(--muted); font-size: 12px; }
+.dp-sum { flex: 1 1 260px; display: grid; gap: 0; font-size: 12px; color: var(--muted); line-height: 1.35; min-width: 0; }
+.dp-sum b { color: var(--ink); }
+.dp-msgs { display: grid; gap: 2px; margin-top: 6px; }
+.dp-msgs p { margin: 0; }
+.dp-msgs .dk-rule { color: var(--muted); font-size: 12px; }
+.dp-tools { display: grid; gap: 8px; margin: 10px 0 6px; }
+#dp-q { font: inherit; font-size: 15px; width: 100%; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+#dp-q:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+.dp-chips { display: grid; gap: 6px; }
+.dp-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.dp-row > b { width: 3.4em; font-size: 12px; color: var(--muted); }
+.dp-chip { font: inherit; font-size: 13px; font-weight: 700; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+.dp-chip.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.dp-chip:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.dp-sort { margin-left: auto; font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.dp-sort select { font: inherit; font-size: 13px; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+.dp-presets { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.dp-found { font-size: 12px; color: var(--muted); margin: 4px 2px 8px; }
+.dp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 12px; align-items: start; }
+.dp-empty { grid-column: 1 / -1; text-align: center; color: var(--muted); padding: 40px 0; }
+.dk-card { display: grid; gap: 4px; padding: 10px 11px 9px; border-radius: 13px; border: 2px solid; position: relative; transition: box-shadow .15s, transform .15s; }
+.dk-card.a-day { background: #fbf3df; border-color: #d9a441; color: #2a2010; }
+.dk-card.a-night { background: #1f2453; border-color: #7f8cff; color: #e8eaff; }
+.dk-card.a-none { background: #ebe8e2; border-color: #9c958a; color: #26231e; }
+.dk-card.a-both { background: linear-gradient(160deg, #fbf3df 0 45%, #c9cdf0 100%); border-color: #b48ad9; color: #241a33; }
+.dk-card.t-buddha, .dk-card.t-ougi { background: #3a2b0c; border-color: #f0cf73; color: #fbefc8; }
+.dk-card.have { box-shadow: 0 0 0 3px var(--accent), 0 6px 14px rgba(0,0,0,.2); }
+.dk-card.lack { filter: saturate(.35); opacity: .6; }
+.dkc-top { display: flex; justify-content: space-between; gap: 6px; font-size: 10.5px; font-weight: 700; opacity: .75; }
+.dkc-name { font-family: var(--f-display); font-size: 18px; font-weight: 800; line-height: 1.2; }
+.dkc-big { font-family: var(--f-display); font-size: 26px; font-weight: 800; line-height: 1.05; font-variant-numeric: tabular-nums; min-height: 1.05em; }
+.dk-card.a-day .dkc-big { color: #c0561b; } .dk-card.a-night .dkc-big { color: #ffb36b; } .dk-card.t-ougi .dkc-big, .dk-card.t-buddha .dkc-big { color: #f0cf73; font-size: 20px; }
+.dkc-text { font-size: 12px; line-height: 1.4; }
+.dkc-cost { font-size: 11px; font-weight: 700; opacity: .8; font-variant-numeric: tabular-nums; }
+.dkc-foot { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 2px; }
+.dk-card .dk-btn { width: 34px; height: 34px; background: rgba(255,255,255,.92); color: #1c2230; }
+.dk-card .dk-count output { color: inherit; font-size: 18px; }
+.dk-card .dk-count output.zero { opacity: .45; }
+.dk-card .dk-des { padding: 6px 7px; }
+/* 絞り込み：1行ずつ横にスクロール（スマホで縦に伸びないように） */
+.dp-row, .dp-presets { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+.dp-row::-webkit-scrollbar, .dp-presets::-webkit-scrollbar { display: none; }
+.deckpage, .dp-tools, .dp-tools > *, .dp-chips, .dp-row, .dp-presets, .dp-grid, .dk-card { min-width: 0; }
+.dp-chip, .dp-presets .btn, .dp-presets > span, .dp-sort, .dp-row > b { flex: none; white-space: nowrap; }
+.dp-sort { margin-left: 8px; }
+@media (max-width: 600px) {
+  .dp-head { gap: 4px 10px; }
+  .dp-sum { flex: 1 1 100%; order: 5; font-size: 11.5px; }
+  .dp-sum span:nth-child(3) { display: none; }
+  .dp-msgs .dk-rule { display: none; }
+  .dp-tools { gap: 6px; margin-top: 8px; }
+  #dp-q { padding: 8px 12px; font-size: 14px; }
+}
+.dkc-foot { flex-wrap: wrap; }
+@media (max-width: 600px) {
+  .dk-card { padding: 8px 8px 7px; }
+  .dk-card .dk-btn { width: 30px; height: 30px; font-size: 16px; }
+  .dk-card .dk-count { gap: 3px; }
+  .dk-card .dk-count output { width: 1.3em; font-size: 16px; }
+  .dk-card .dk-des { padding: 4px 6px; font-size: 11px; }
+  .dkc-top { font-size: 9.5px; }
+  .dkc-top .dkc-own { white-space: nowrap; }
+}
+@media (max-width: 600px) { .dp-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; } .dkc-name { font-size: 16px; } .dkc-big { font-size: 22px; } .dkc-text { font-size: 11.5px; } .dp-sort { margin-left: 0; } }
 </style>
 
 <div class="home" id="home">
@@ -798,6 +875,8 @@ div.prof-card { cursor: default; flex-wrap: wrap; }
   </div>
 
 </div>
+
+<div class="deckpage" id="deckpage"></div>
 
 <div class="banner" id="banner" hidden aria-live="assertive"></div>
 <div class="overlay" id="overlay" hidden><div class="dialog" id="dialog" role="dialog" aria-modal="true"></div></div>
