@@ -129,7 +129,7 @@
     frame: prof.equip.frame, sleeve: prof.equip.sleeve, mat: prof.equip.mat, arts: { ...prof.artUse },
   };
   M.aiCos = () => ({ name: "AI", icon: pick(["☾", "✦", "⚔"]), title: "", frame: "plain", sleeve: pick(["basic", "crimson", "azure"]), mat: "basic", arts: {} });
-  M.owned = id => prof ? (prof.owned[id] || 0) : maxCopies(id);
+  M.owned = id => CARDS[id]?.joke ? (cfg.joke ? 1 : 0) : prof ? (prof.owned[id] || 0) : maxCopies(id);   // ネタカードは設定でオンにしたときだけ1枚持っている扱い
 
   /* ---------- 賭け ---------- */
   M.cap = (pts = prof?.points || 0) => CAPS.filter(([at]) => pts >= at).pop()[1];
@@ -263,7 +263,7 @@
   function rollCard(rareSlot) {
     const r = Math.random();
     const tier = rareSlot ? (r < 0.15 ? "SR" : "R") : (r < 0.05 ? "SR" : r < 0.40 ? "R" : "C");
-    return pick(Object.keys(CARDS).filter(id => rarity(id) === tier));
+    return pick(Object.keys(CARDS).filter(id => !CARDS[id].joke && rarity(id) === tier));
   }
   function rollArt() {
     let r = Math.random() * 100;
@@ -284,7 +284,7 @@
       }
     } else {
       for (let i = 0; i < 3; i++) {
-        const id = pick(Object.keys(CARDS)), art = rollArt(), k = `${id}:${art}`;
+        const id = pick(Object.keys(CARDS).filter(x => !CARDS[x].joke)), art = rollArt(), k = `${id}:${art}`;
         const dup = !!prof.arts[k];
         if (dup) prof.points += DUPE_ART; else prof.arts[k] = 1;
         got.push({ id, art, isNew: !dup, extra: dup ? `持っているので+${DUPE_ART}pt` : `${ARTS[art][0]}・コレクションで使える` });

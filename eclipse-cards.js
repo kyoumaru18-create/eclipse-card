@@ -198,6 +198,7 @@ const CARDS = {
   haritate: { name: "針の楯", attr: "night", type: "thorns", power: 4, turns: 3, cost: 3, recover: 3 },
   bannin: { name: "番人", attr: "day", type: "summon", power: 2, hp: 10, mthorn: 3, cost: 5, recover: 5 },
   gyakushu: { name: "逆襲", attr: "night", type: "attack", power: 6, revenge: true, cost: 4, recover: 4 },
+  yaou: { name: "夜王の裁き", attr: "night", type: "attack", power: 90000, healHp: 50, healSh: 50, joke: true, cost: 0, recover: 0 },   // ネタカード（設定でオンにしたときだけ・賭けなしのAI戦だけ）
   kongoken: { name: "金剛拳", attr: "day", type: "attack", power: 5, zeal: true, wrathok: true, cost: 2, recover: 3 },
   myoo: { name: "明王", attr: "night", type: "attack", power: 4, zeal: true, wrathok: true, cost: 1, recover: 2 },
   rakan: { name: "羅漢", attr: "day", type: "attack", power: 8, zeal: true, cost: 4, recover: 4 },
@@ -692,6 +693,8 @@ class Game {
     }
     if (p.bleed) { this.dotHit(p, R.BLEED_DMG * this.dotMult(p), "出血"); if (this.over) return; }
     if (c.type === "attack") {
+      if (c.healHp) { const b = p.hp; p.hp = Math.min(R.MAX_HP, p.hp + c.healHp); this.log(`${c.name}：${p.name}のHP ${b}→${p.hp}`, "heal", this.idx(p), p.hp - b); }   // 夜王の裁き：使ったらHPとシールドが回復
+      if (c.healSh) { const b = p.shield; p.shield = Math.min(R.SHIELD_CAP, p.shield + c.healSh); this.log(`${c.name}：${p.name}のシールド ${b}→${p.shield}`, "shield", this.idx(p), p.shield - b); }
       const raw = this.outgoing(p, this.attackPower(p, c), this.cardMult(c, p));
       const mon = this.target; this.target = null;
       const amt = mon != null ? Math.max(0, Math.floor(raw + 0.5)) : this.incoming(o, raw);
@@ -1347,7 +1350,7 @@ const AI = {
 
 /* ===== 設定（この端末のブラウザに保存） ===== */
 const CFG_KEY = "eclipse-settings";
-const cfg = { motion: true, confirm2: true, fast: false };
+const cfg = { motion: true, confirm2: true, fast: false, joke: false };
 try { Object.assign(cfg, JSON.parse(localStorage.getItem(CFG_KEY) || "{}")); } catch {}
 function saveCfg() { try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch {} }
 /* AIの「考えている時間」。設定で速くできる */
@@ -1697,6 +1700,7 @@ function cardMain(p, c) {
     if (c.allday && m === 1) extra += "昼でも夜でも1.5倍";
     if (c.zeal) extra += "＋仏の怒りの溜め×2";
     if (c.wrathok) extra += "。怒り状態でも使える";
+    if (c.healHp) extra += `使うとHP+${c.healHp}・シールド+${c.healSh || 0}（上限まで）`;
     if (c.paidbonus) extra += `払ったHP（今${p.hpPaidTurn || 0}＋${c.hpcost}）を足す`;
     if (c.fury) extra += `（このターン使った${p.usedTurn || 0}枚・払ったHP${p.hpPaidTurn || 0}で上がる）`;
     if (c.blind) extra += `＋相手を${c.blind}ターン暗闇（引いたカードが裏向き）`;
@@ -1997,7 +2001,7 @@ async function saveDeck(deck) {
 /* デッキ編集画面に出すカードの説明（試合中でなくても出せる固定の文） */
 function cardBrief(c, id = c.id) {   // カード一覧（CARDS）の中身には id が入っていないので、呼ぶ側から渡す
   switch (c.type) {
-    case "attack": return `${c.power}ダメージ${c.drain ? "・与ダメの半分HP回復" : ""}${c.recoil ? `・自分もHP-${c.recoil}` : ""}${c.eclipse ? "・日没と夜明けは2倍" : ""}${c.rage ? `・減ったHP${BLOOD.RAGE_STEP}ごとに+1` : ""}${c.hpcost ? `・HPを${c.hpcost}払う` : ""}${c.revenge ? "・前の相手ターンに受けたダメージの半分を上乗せ" : ""}${c.poison ? `・毒${c.poison}` : ""}${c.numbing ? "・相手の次のターン、使えるカード-1" : ""}${c.paralyze ? "・相手の次のターン、ドローできない" : ""}${c.blind ? `・相手を${c.blind}ターン暗闇（引いたカードが裏向き）` : ""}${c.allday ? "・昼でも夜でも1.5倍" : ""}${c.zeal ? "・仏の怒りの溜め×2を足す" : ""}${c.wrathok ? "・怒り状態でも使える" : ""}${c.fury ? "・このターン使ったカード1枚ごとに+2、払ったHP3ごとに+1" : ""}${c.paidbonus ? "・このターンに払ったHPの分だけ上乗せ" : ""}${c.attr === "both" ? "・昼でも夜でも1.5倍" : ""}${c.splash ? "・与えた分シールド回復" : ""}${c.frenzy ? "・HPが半分以下なら2倍" : ""}`;
+    case "attack": return `${c.power}ダメージ${c.drain ? "・与ダメの半分HP回復" : ""}${c.recoil ? `・自分もHP-${c.recoil}` : ""}${c.eclipse ? "・日没と夜明けは2倍" : ""}${c.rage ? `・減ったHP${BLOOD.RAGE_STEP}ごとに+1` : ""}${c.hpcost ? `・HPを${c.hpcost}払う` : ""}${c.revenge ? "・前の相手ターンに受けたダメージの半分を上乗せ" : ""}${c.poison ? `・毒${c.poison}` : ""}${c.numbing ? "・相手の次のターン、使えるカード-1" : ""}${c.paralyze ? "・相手の次のターン、ドローできない" : ""}${c.blind ? `・相手を${c.blind}ターン暗闇（引いたカードが裏向き）` : ""}${c.allday ? "・昼でも夜でも1.5倍" : ""}${c.zeal ? "・仏の怒りの溜め×2を足す" : ""}${c.wrathok ? "・怒り状態でも使える" : ""}${c.fury ? "・このターン使ったカード1枚ごとに+2、払ったHP3ごとに+1" : ""}${c.healHp ? `・使うとHP+${c.healHp}・シールド+${c.healSh || 0}` : ""}${c.paidbonus ? "・このターンに払ったHPの分だけ上乗せ" : ""}${c.attr === "both" ? "・昼でも夜でも1.5倍" : ""}${c.splash ? "・与えた分シールド回復" : ""}${c.frenzy ? "・HPが半分以下なら2倍" : ""}`;
     case "draw": return `HPを${c.hpcost}払って${c.power}枚引く`;
     case "sutra": return "デッキから仏の怒りを1枚手札に加える";
     case "gassho": return `シールド+${c.power}。怒り状態でも使える`;
@@ -2127,6 +2131,7 @@ function renderDeckPage() {
   const attrOrder = { day: 0, night: 1, both: 2, none: 3 };
   let list = Object.entries(CARDS).filter(([id, c]) => {
     const n = def[id] || 0, has = Math.min(own(id), maxCopies(id));
+    if (c.joke && !cfg.joke) return false;   // ネタカードは、設定でオンにしたときだけ出す
     if (dkf.attrs.size && !dkf.attrs.has(c.attr)) return false;
     if (dkf.types.size && ![...cardTags(c)].some(t => dkf.types.has(t))) return false;
     if (dkf.only === "deck" && !n) return false;
@@ -2251,6 +2256,7 @@ function showSettings() {
     ${opt("motion", "カードの動き", "ドロー・コール・ドロップゾーンへの移動を動きで見せる")}
     ${opt("confirm2", "2回押して決定", "1回目でHP・シールドの変化をゲージで見せ、もう一度押すと使う。切ると1回で使う")}
     ${opt("fast", "AIを速くする", "AIが考える時間を短くする")}
+    ${opt("joke", "ネタカードを使う", "夜王の裁き（HPとシールドが50回復・90000ダメージ）が使えるようになる。賭けなしのAI戦だけ。オンラインと賭けでは使えない")}
     <p>設定はこの端末のブラウザに保存される。</p>
     <button class="btn" data-act="close">閉じる</button>`, "settings");
 }
@@ -2277,7 +2283,11 @@ function showTutorial(i = 0) {
 }
 
 /* ===== AI対戦 ===== */
+/* ネタカード（夜王の裁き など）が入っているデッキは、賭けなしのAI戦でしか使えない（ポイントやオンライン対戦で不正に勝てないように） */
+function jokeInDeck() { return Object.keys(myDeck.cards).some(id => CARDS[id]?.joke); }
+const JOKE_NG = "ネタカードが入っているデッキは、賭けなしのAI戦でしか使えない。デッキ編集で外そう。";
 function startAI(bet = 0) {
+  if (bet > 0 && jokeInDeck()) return showHome(JOKE_NG);
   leaveRoom();
   gameId++;
   mode = "ai"; seat = 0; busy = false;
@@ -2546,6 +2556,7 @@ function leaveRoom() {
 }
 
 async function createRoom() {
+  if (jokeInDeck()) return menuMsg(JOKE_NG);
   menuMsg("部屋を作っています…", true);
   try {
     let code, ref;
@@ -2570,6 +2581,7 @@ async function createRoom() {
 }
 
 async function joinRoom(code, agreed = false) {
+  if (jokeInDeck()) return menuMsg(JOKE_NG);
   code = (code || "").trim().toUpperCase();
   if (!/^[A-Z0-9]{4}$/.test(code)) return menuMsg("4文字のコードを入力しよう。");
   menuMsg("部屋を探しています…", true);
