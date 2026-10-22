@@ -450,14 +450,6 @@ button.st, button.stack { font: inherit; text-align: left; cursor: pointer; }
 #game .side { display: flex; flex-direction: column; }
 #game .side .board { flex: 1 1 auto; }
 #game .side .slot, #game .side .pile { min-height: 84px; }
-/* 上の見出し：ボタンは昼夜の表の右に並べて1行にする（広い画面）。昼夜の説明文は消す（表を見れば分かる） */
-.sky-head span { display: none; }
-@media (min-width: 700px) {
-  #game { grid-template-columns: minmax(0, 1fr) auto; }
-  #game > * { grid-column: 1 / -1; }
-  #game > .sky { grid-row: 1; grid-column: 1; }
-  #game > .top { grid-row: 1; grid-column: 2; align-self: center; }
-}
 /* 背の低い画面：場のマスを低くして、手札を開いても1画面に収める */
 @media (max-height: 880px) {
   #game .side .slot, #game .side .pile { min-height: 62px; }
@@ -682,6 +674,42 @@ div.prof-card { cursor: default; flex-wrap: wrap; }
   *, *::before { animation: none !important; transition: none !important; }
   .gh.loss { opacity: .4; } .gh.gain { opacity: .3; }   /* 点滅しない代わりに薄く出す */
 }
+
+/* ===== 配置：右上に時計、手札の右にデッキ（その上にドロップ）、手札は場を動かさずに上へせり上がる ===== */
+#game { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr) auto; }
+#game > * { grid-column: 1; }
+#game > .top { grid-row: 1; } #game #side-enemy { grid-row: 2; } #game #side-me { grid-row: 3; } #game .dock { grid-row: 4; }
+#game .top { position: static; justify-content: flex-start; align-items: center; min-height: 76px; padding-right: 88px; }
+#game .top .top-btns { flex-wrap: wrap; }
+/* 昼夜の時計：右上にはりつく */
+.clock { position: absolute; top: 8px; right: 12px; width: 76px; height: 76px; z-index: 30; filter: drop-shadow(0 3px 6px rgba(0,0,0,.28)); }
+.clock svg { width: 100%; height: 100%; display: block; }
+.clock .seg { stroke: rgba(255,255,255,.85); stroke-width: 1.2; opacity: .5; }
+.clock .seg.cur { opacity: 1; stroke: #fff; stroke-width: 2.4; }
+.clock .seg.day { fill: #f3c766; } .clock .seg.dusk { fill: #ec8d55; } .clock .seg.night { fill: #3d4790; } .clock .seg.dawn { fill: #8fc3d6; }
+.clock .face { fill: var(--panel, #fff); stroke: rgba(0,0,0,.15); stroke-width: 1; }
+.clock .needle { stroke: #1c2230; stroke-width: 2.6; stroke-linecap: round; }
+.clock text { font-family: var(--f-display); text-anchor: middle; fill: #1c2230; font-weight: 800; }
+.clock .t-phase { font-size: 17px; } .clock .t-round { font-size: 9px; font-weight: 700; fill: #566070; }
+/* 自分のデッキとドロップゾーンは、手札の右に縦に並べる（ドロップが上、デッキが下） */
+.handrow { display: grid; grid-template-columns: minmax(0, 1fr) 62px; gap: 8px; align-items: end; }
+.handslot { position: relative; height: 100px; }
+.piles { display: grid; grid-template-rows: 1fr 1fr; gap: 6px; height: 100px; }
+.piles .pile { min-height: 0; height: 100%; padding: 2px; grid-auto-flow: column; gap: 4px; align-content: center; justify-content: center; }
+.pile small { white-space: nowrap; letter-spacing: -.02em; }
+.piles .pile small { font-size: 9px; }
+.piles .pile em { display: none; }
+.piles .pile .pile-n { font-size: 18px; }
+/* 手札：場の上にせり上がる。たたんでいるときの高さ（100px）だけ場に場所を取る。開いても場は動かない */
+.handwrap { position: absolute; left: 0; right: 0; bottom: 0; z-index: 8; display: flex; flex-direction: column; pointer-events: none; }
+.handwrap .card, .handwrap .hand-head { pointer-events: auto; }
+.handwrap .hand-head { position: static; align-self: flex-end; margin: 0 2px 2px 0; }
+.handwrap .hand { scrollbar-width: none; padding: 12px 2px 2px; }
+.handwrap .hand::-webkit-scrollbar { display: none; }
+.hand.mini { padding-top: 6px; }
+#game #side-me .board { grid-template-columns: minmax(0, 1fr); }
+#game #side-enemy .board { grid-template-columns: 52px minmax(0, 1fr) 44px; }
+@media (min-width: 700px) { #game #side-enemy .board { grid-template-columns: 64px minmax(0, 1fr) 54px; } .clock { width: 88px; height: 88px; } #game .top { min-height: 88px; padding-right: 100px; } }
 </style>
 
 <div class="home" id="home">
@@ -742,22 +770,23 @@ div.prof-card { cursor: default; flex-wrap: wrap; }
       <button class="btn small" id="howBtn">遊び方</button>
       <button class="btn small" id="menuBtn">ホーム</button>
     </div>
+    <div class="clock" id="clock" role="img" aria-label="昼夜の時計"></div>
   </header>
-
-  <section class="box sky" aria-label="昼夜の進み">
-    <div class="sky-head"><strong id="phaseName">昼</strong><span id="phaseInfo"></span></div>
-    <div class="track" id="track"></div>
-  </section>
 
   <section class="box side" id="side-enemy" aria-label="敵"></section>
   <section class="box side" id="side-me" aria-label="あなた"></section>
 
   <div class="dock">
-    <section class="box guide" id="guide" aria-live="polite"></section>
-    <section aria-label="手札">
-      <div class="hand-head"><strong>手札</strong><span id="deckInfo"></span></div>
-      <div class="hand" id="hand"></div>
+    <section class="handrow" aria-label="手札">
+      <div class="handslot">
+        <div class="handwrap">
+          <div class="hand-head"><strong>手札</strong><span id="deckInfo"></span></div>
+          <div class="hand" id="hand"></div>
+        </div>
+      </div>
+      <div class="piles" id="dock-piles" aria-label="あなたのデッキとドロップゾーン"></div>
     </section>
+    <section class="box guide" id="guide" aria-live="polite"></section>
     <div class="mystats">
       <div class="status mystatus" id="dock-status" aria-label="あなたの状態"></div>
       <div class="bars mybars" aria-label="あなたのゲージ">

@@ -1471,7 +1471,27 @@ function sideSkeleton(key) {
     <div class="fx" id="${key}-fx"></div>`;
 }
 sideSkeleton("enemy"); sideSkeleton("me");
-$("track").innerHTML = CYCLE.map((ph, i) => `<div class="cell ${ph}" id="cell-${i}">${{ day: "昼", dusk: "没", night: "夜", dawn: "明" }[ph]}</div>`).join("");
+/* 昼夜の時計：8つの扇（昼3・日没・夜3・夜明け）を時計まわりに並べ、いまの巡の扇を光らせて針を向ける */
+function renderClock() {
+  const n = CYCLE.length, idx = (g.round - 1) % n, R0 = 44, R1 = 27, cx = 50, cy = 50;
+  const pt = (r, a) => [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+  const ang = i => -Math.PI / 2 + (i / n) * Math.PI * 2;
+  const wedge = i => {
+    const a0 = ang(i) + 0.015, a1 = ang(i + 1) - 0.015, [x0, y0] = pt(R0, a0), [x1, y1] = pt(R0, a1), [x2, y2] = pt(R1, a1), [x3, y3] = pt(R1, a0);
+    return `M${x0.toFixed(1)} ${y0.toFixed(1)}A${R0} ${R0} 0 0 1 ${x1.toFixed(1)} ${y1.toFixed(1)}L${x2.toFixed(1)} ${y2.toFixed(1)}A${R1} ${R1} 0 0 0 ${x3.toFixed(1)} ${y3.toFixed(1)}Z`;
+  };
+  const mid = ang(idx + 0.5), [nx, ny] = pt(R1 - 3, mid), [mx, my] = pt(R0 + 4, mid);
+  const myPolar = POLAR[g.players[seat]?.hiou];
+  $("clock").setAttribute("aria-label", `第${g.round}巡 ${PHASE_JP[g.phase]}${myPolar ? `（あなたの場は${myPolar.name}）` : ""}`);
+  $("clock").title = `第${g.round}巡 ${PHASE_JP[g.phase]}${myPolar ? `\nあなたの場は${myPolar.name}` : ""}`;
+  $("clock").innerHTML = `<svg viewBox="0 0 100 100">
+    <circle class="face" cx="50" cy="50" r="48"/>
+    ${CYCLE.map((ph, i) => `<path class="seg ${ph}${i === idx ? " cur" : ""}" d="${wedge(i)}"/>`).join("")}
+    <line class="needle" x1="${nx.toFixed(1)}" y1="${ny.toFixed(1)}" x2="${mx.toFixed(1)}" y2="${my.toFixed(1)}"/>
+    <text class="t-phase" x="50" y="50">${PHASE_JP[g.phase]}</text>
+    <text class="t-round" x="50" y="62">第${g.round}巡</text>
+  </svg>`;
+}
 
 /* 「結果」の1行：HPとシールドが最終的にいくつになったか */
 function changeText([h0, h1, s0, s1]) {
@@ -1582,11 +1602,15 @@ function renderBoard(key, p, mons = null) {
     </div>`;
   }).join("");
   const top = p.drop[p.drop.length - 1];
-  $(`${key}-board`).innerHTML = `
-    <div class="pile deck sleeve-${p.cos?.sleeve || "basic"}" id="${key}-deck"><span class="pile-n">${p.deck.length}</span><small>デッキ</small></div>
-    <div class="slots">${slots}</div>
-    <button class="pile drop" id="${key}-drop" data-act="drop" data-seat="${i}" aria-label="${nameOf(i)}のドロップゾーンを見る">
+  const deckHTML = `<div class="pile deck sleeve-${p.cos?.sleeve || "basic"}" id="${key}-deck"><span class="pile-n">${p.deck.length}</span><small>デッキ</small></div>`;
+  const dropHTML = `<button class="pile drop" id="${key}-drop" data-act="drop" data-seat="${i}" aria-label="${nameOf(i)}のドロップゾーンを見る">
       <span class="pile-n">${p.drop.length}</span><small>ドロップ</small>${top ? `<em class="a-${top.attr}">${top.name}</em>` : ""}</button>`;
+  if (key === "me") {   // 自分のデッキ・ドロップゾーンは、手札の右に縦に並べる（ドロップが上、デッキが下）
+    $(`${key}-board`).innerHTML = `<div class="slots">${slots}</div>`;
+    $("dock-piles").innerHTML = dropHTML + deckHTML;
+  } else {
+    $(`${key}-board`).innerHTML = `${deckHTML}<div class="slots">${slots}</div>${dropHTML}`;
+  }
 }
 function renderSide(key, p, pv = null, mons = null) {
   const i = g.idx(p);
@@ -1781,21 +1805,7 @@ function render() {
   if (document.body.dataset.view === "game") document.documentElement.dataset.phase = g.phase;
   $("modeFlag").textContent = mode === "online" ? `オンライン・部屋 ${room?.code || ""}` : "AI対戦";
 
-  const idx = (g.round - 1) % CYCLE.length;
-  CYCLE.forEach((ph, i) => {
-    const cell = $(`cell-${i}`);
-    const ov = g.override?.[g.round - idx + i];   // 白夜・極夜で変わった巡
-    cell.className = `cell ${ov || ph}${ov ? " polar" : ""}`;
-    cell.textContent = ov ? (ov === "day" ? "白" : "極") : { day: "昼", dusk: "没", night: "夜", dawn: "明" }[ph];
-    cell.classList.toggle("cur", i === idx);
-    cell.classList.toggle("past", i < idx);
-  });
-  const myPolar = POLAR[g.players[seat]?.hiou];
-  $("phaseName").textContent = `第${g.round}巡　${PHASE_JP[g.phase]}${myPolar ? `（あなたの場は${myPolar.name}）` : ""}`;
-  const [k, nxt] = g.roundsToTransition();
-  const esc = g.escalation();
-  $("phaseInfo").textContent = (k === 0 ? "秘奥のチャンス" : `次の${PHASE_JP[nxt]}まであと${k}巡${g.phase === "day" || g.phase === "night" ? `　${PHASE_JP[g.phase]}のカードが1.5倍` : ""}`)
-    + (esc > 1 ? `　日蝕の深まり：全ダメージ×${esc}` : "");
+  renderClock();
 
   const rects = captureRects();   // 動きの演出用：描き直す前のカードの位置
   const pv = selPreview();
@@ -2541,6 +2551,8 @@ function rematch() {
   render();
   save();
 }
+
+$("hand").addEventListener("wheel", e => { if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { $("hand").scrollLeft += e.deltaY; e.preventDefault(); } }, { passive: false });
 
 /* ===== 手札の引き出し：たたむと名前と数字だけの小さいタイルになり、場が広がる（選んだ状態は覚えておく） ===== */
 let handOpen = true;
