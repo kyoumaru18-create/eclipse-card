@@ -450,6 +450,21 @@ button.st, button.stack { font: inherit; text-align: left; cursor: pointer; }
 #game .side { display: flex; flex-direction: column; }
 #game .side .board { flex: 1 1 auto; }
 #game .side .slot, #game .side .pile { min-height: 84px; }
+/* 上の見出し：ボタンは昼夜の表の右に並べて1行にする（広い画面）。昼夜の説明文は消す（表を見れば分かる） */
+.sky-head span { display: none; }
+@media (min-width: 700px) {
+  #game { grid-template-columns: minmax(0, 1fr) auto; }
+  #game > * { grid-column: 1 / -1; }
+  #game > .sky { grid-row: 1; grid-column: 1; }
+  #game > .top { grid-row: 1; grid-column: 2; align-self: center; }
+}
+/* 背の低い画面：場のマスを低くして、手札を開いても1画面に収める */
+@media (max-height: 880px) {
+  #game .side .slot, #game .side .pile { min-height: 62px; }
+  #game .side { padding-block: 6px; gap: 4px; }
+  #game { gap: 8px; padding-block-start: 8px; }
+  .pile-n { font-size: 18px; }
+}
 /* 手札の引き出し：たたむと名前と数字だけの小さいタイルになる */
 .hand-head { cursor: pointer; user-select: none; }
 .hand.mini { padding-top: 10px; }
@@ -474,15 +489,6 @@ button.st, button.stack { font: inherit; text-align: left; cursor: pointer; }
 .pile, .slot { min-height: 76px; }
 .hand-head strong { font-size: 15px; }
 
-/* 広い画面：相手の場と自分の場を左右に並べて、縦に収める */
-@media (min-width: 900px) {
-  #game { grid-template-columns: 1fr 1fr; grid-template-rows: auto auto minmax(0, 1fr) auto; }
-  #game > .top, #game > .sky, #game > .dock { grid-column: 1 / -1; }
-  #game #side-enemy, #game #side-me { grid-row: 3; }
-  #game .dock { grid-row: 4; }
-  #game #side-enemy { grid-column: 1; } #game #side-me { grid-column: 2; }
-  #game > .top, #game > .sky, #game > .dock { grid-column: 1 / -1; }
-  #side-me, #side-enemy { align-self: stretch; }
 }
 
 /* スマホ：情報を詰めて、案内と手札を画面下に固定する */
