@@ -223,7 +223,7 @@ const PRESETS = {
   moon: { name: "夜特化", cards: {
     slash: 3, ambush: 3, nightowl: 3, drain: 3, moonturn: 2, twilight: 3, oborozuki: 3, shingetsu: 3, bleed: 3, gassho: 1, needle: 2, firstaid: 3, tsukuyomi: 4 } },
   venom: { name: "状態異常", cards: {
-    needle: 3, bleed: 3, drain: 2, mahi: 3, fang: 3, metsubushi: 2, mushibami: 3, dokugumo: 2, dokumaku: 2, mimic: 2, dokugiri: 2, koromo: 2, firstaid: 3, kodoku: 4 } },
+    needle: 3, bleed: 3, moudoku: 2, mahi: 3, fang: 3, dokuhebi: 2, mushibami: 3, dokugumo: 2, dokumaku: 2, mimic: 2, dokugiri: 2, koromo: 2, firstaid: 3, kodoku: 4 } },
   counter: { name: "カウンター", cards: {
     counter: 3, parry: 3, revenge: 3, thorns: 2, kyoka: 4, karma: 3, strike: 2, slash: 2, monban: 2, kamaenaoshi: 2, machi: 2, drain: 2, heal: 3, firstaid: 3 } },
   buddha: { name: "仏の怒り", cards: {
