@@ -73,7 +73,7 @@ const BUFFS = {
   plague: ["疫病", "以降、毎ターン始めに相手に毒1"],
   riposte: ["返し刃", "以降、反撃の構えは受けた攻撃を全部返す"],
   steadfast: ["不動", "以降、受ける攻撃のダメージ-5"],
-  bloodthirst: ["血の渇き", "以降、HPを払うカードで払ったHPの半分だけシールド回復"],
+  bloodthirst: ["血の渇き", "以降、HPを払うカードで払ったHPと同じだけシールド回復"],
   bloodflow: ["血の巡り", "以降、HPを払うカードで払ったHPの半分だけHP回復"],
   undying: ["不死身", "1回だけ、HPが0になってもHP1で踏みとどまる"],
   regenplus: ["再生強化", "以降、毎ターン始めにHP+2"],
@@ -651,7 +651,7 @@ class Game {
       p.hpPaidTurn = (p.hpPaidTurn || 0) + c.hpcost;
       this.bloodFeast(p);
       if (this.over) return;
-      if (p.buffs.has("bloodthirst")) p.shield = Math.min(R.SHIELD_CAP, p.shield + Math.floor(c.hpcost * 0.5 + 0.5));   // 秘奥・血の渇き（払ったHPの半分）
+      if (p.buffs.has("bloodthirst")) p.shield = Math.min(R.SHIELD_CAP, p.shield + c.hpcost);   // 秘奥・血の渇き（払ったHPと同じだけ。HPはシールドの2倍の価値があるので、血の巡りは半分）
       if (p.buffs.has("bloodflow") && !this.over) {   // 秘奥・血の巡り（払ったHPの半分を回復）
         const back = Math.floor(c.hpcost * 0.5 + 0.5);
         p.hp = Math.min(R.MAX_HP, p.hp + back);
