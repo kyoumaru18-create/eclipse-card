@@ -434,9 +434,27 @@ button.st, button.stack { font: inherit; text-align: left; cursor: pointer; }
 .st-head { display: none; }
 .st.neg { border-color: var(--bad); } .st.pos { border-color: var(--good); }
 .dock {
-  position: sticky; bottom: 0; z-index: 5; margin-inline: -16px; padding: 8px 16px calc(8px + env(safe-area-inset-bottom, 0px));
-  background: var(--sky-bot); border-top: 1px solid var(--line); gap: 8px; box-shadow: 0 -8px 20px rgba(0, 0, 0, .18);
+  position: sticky; bottom: 0; z-index: 5; margin-inline: -16px; padding: 0 16px calc(6px + env(safe-area-inset-bottom, 0px));
+  background: transparent; border: 0; box-shadow: none; gap: 6px;   /* 帯の背景はなし：カードの隙間は透明 */
 }
+.hand-head { width: fit-content; padding: 1px 10px; border-radius: 999px; background: var(--panel); backdrop-filter: blur(6px); gap: 12px; }
+.mystats { display: grid; gap: 4px; padding: 5px 10px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); backdrop-filter: blur(6px); }
+.mystats .mystatus { gap: 4px; }
+.mystats .mybars { padding: 0; }
+/* 場を広くする：画面いっぱいに、相手の場・自分の場を縦に伸ばす */
+/* 場を広くする：画面の高さいっぱいに、相手の場・自分の場が余った高さを分け合って大きくなる（モンスターのマスが縦に伸びる） */
+#game { min-height: 100dvh; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) minmax(0, 1fr) auto; padding-block-end: 0; }
+#game > * { grid-column: 1; }
+#game > .top { grid-row: 1; } #game > .sky { grid-row: 2; }
+#game #side-enemy { grid-row: 3; } #game #side-me { grid-row: 4; } #game .dock { grid-row: 5; }
+#game .side { display: flex; flex-direction: column; }
+#game .side .board { flex: 1 1 auto; }
+#game .side .slot, #game .side .pile { min-height: 84px; }
+/* 手札の見出しは、カードの上に重ねて小さく（帯を低くする） */
+.dock section[aria-label="手札"] { position: relative; }
+.hand-head { position: absolute; right: 4px; top: -4px; z-index: 2; font-size: 11px; }
+.hand-head strong { font-size: 12px; }
+.hand { padding-top: 12px; }
 .hand { padding: 16px 4px 2px; }
 .c-top { display: none; }
 .c-main { min-height: 0; font-size: 11.5px; line-height: 1.3; }
@@ -449,9 +467,13 @@ button.st, button.stack { font: inherit; text-align: left; cursor: pointer; }
 
 /* 広い画面：相手の場と自分の場を左右に並べて、縦に収める */
 @media (min-width: 900px) {
-  #game { grid-template-columns: 1fr 1fr; align-items: start; }
-  #game > .top, #game > .sky, #game > .dock, #game > .logbox { grid-column: 1 / -1; }
-  #side-me { align-self: stretch; align-content: start; }
+  #game { grid-template-columns: 1fr 1fr; grid-template-rows: auto auto minmax(0, 1fr) auto; }
+  #game > .top, #game > .sky, #game > .dock { grid-column: 1 / -1; }
+  #game #side-enemy, #game #side-me { grid-row: 3; }
+  #game .dock { grid-row: 4; }
+  #game #side-enemy { grid-column: 1; } #game #side-me { grid-column: 2; }
+  #game > .top, #game > .sky, #game > .dock { grid-column: 1 / -1; }
+  #side-me, #side-enemy { align-self: stretch; }
 }
 
 /* スマホ：情報を詰めて、案内と手札を画面下に固定する */
@@ -516,11 +538,7 @@ button.st, button.stack { font: inherit; text-align: left; cursor: pointer; }
   .hand { padding: 18px 4px 2px; }
   .card.lifted { transform: translateY(-8px); }
   .log .turn { margin-top: 3px; font-size: 11px; }
-  .dock {
-    position: sticky; bottom: 0; z-index: 5; margin-inline: -16px; padding: 8px 16px calc(8px + env(safe-area-inset-bottom, 0px));
-    background: var(--sky-bot); border-top: 1px solid var(--line); display: grid; gap: 6px;
-    box-shadow: 0 -8px 20px rgba(0, 0, 0, .18);
-  }
+  .dock { position: relative; z-index: 5; margin-inline: -16px; padding: 0 16px calc(6px + env(safe-area-inset-bottom, 0px)); display: grid; gap: 6px; }
   .guide { padding: 7px 10px; gap: 6px; }
   .guide-title { font-size: 14px; }
   .guide-text { font-size: 12px; }
@@ -720,23 +738,20 @@ div.prof-card { cursor: default; flex-wrap: wrap; }
   <section class="box side" id="side-me" aria-label="あなた"></section>
 
   <div class="dock">
-    <div class="bars mybars" aria-label="あなたのゲージ">
-      <span>あなた</span>
-      <span>シールド</span><div class="bar"><i class="sh" id="mini-sh"></i><b class="gh" id="mini-shg"></b></div><output id="mini-sho"></output>
-      <span>HP</span><div class="bar"><i class="hp" id="mini-hp"></i><b class="gh" id="mini-hpg"></b></div><output id="mini-hpo"></output>
-    </div>
-    <div class="status mystatus" id="dock-status" aria-label="あなたの状態"></div>
     <section class="box guide" id="guide" aria-live="polite"></section>
     <section aria-label="手札">
       <div class="hand-head"><strong>手札</strong><span id="deckInfo"></span></div>
       <div class="hand" id="hand"></div>
     </section>
+    <div class="mystats">
+      <div class="status mystatus" id="dock-status" aria-label="あなたの状態"></div>
+      <div class="bars mybars" aria-label="あなたのゲージ">
+        <span>あなた</span>
+        <span>シールド</span><div class="bar"><i class="sh" id="mini-sh"></i><b class="gh" id="mini-shg"></b></div><output id="mini-sho"></output>
+        <span>HP</span><div class="bar"><i class="hp" id="mini-hp"></i><b class="gh" id="mini-hpg"></b></div><output id="mini-hpo"></output>
+      </div>
+    </div>
   </div>
-
-  <details class="box logbox">
-    <summary>ログ（何が起きたかの細かい記録）</summary>
-    <div class="log" id="log"></div>
-  </details>
 
 </div>
 

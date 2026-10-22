@@ -1482,6 +1482,7 @@ function changeText([h0, h1, s0, s1]) {
 const LOG_CLASS = { heal: "good", shield: "", play: "", counter: "buff", kyoka: "buff", finisher: "buddha", wrath: "buddha", buffget: "buff" };
 function renderLog() {
   const el = $("log");
+  if (!el) return;   // ログの欄はなくした（記録は g.logs に残る）
   el.innerHTML = g.logs.map(l => {
     if (l.k === "sum") {
       const parts = l.a.map((d, i) => { const t = changeText(d); return t ? `<span class="who">${nameOf(i)}</span>${t}` : ""; }).join("");
