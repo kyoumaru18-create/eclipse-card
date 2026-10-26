@@ -23,6 +23,7 @@ const TYPE_JP = { attack: "攻撃", heal: "HP回復", poison: "毒", bleed: "出
   draw: "ドロー", sutra: "サーチ", gassho: "シールド", linger: "毒", calm: "守り", dohatsu: "守り", berserk: "強化", poisoncup: "強化", koromo: "守り", wait: "反撃", dokumaku: "守り", mimic: "守り", sunshield: "シールド", shieldbreak: "シールド破壊", nembutsu: "シールド", guard: "守り", buddha: "奥義", ougi: "奥義" };
 const MONSTER_EXPECT = 3;   // モンスターが倒されるまでに攻撃する回数の目安（AIの見積もり用）
 const REVENGE_RATE = 0.5;   // 報復：前の相手ターンに受けたダメージのこの割合を上乗せ
+const SHURA_DOT = 2;   // 修羅を溜めている間、毒・出血などの特殊ダメージを受けるたび、次の攻撃+（溜めた枚数×2）
 const RITUAL_HP = 2, RITUAL_DMG = 4, RITUAL_PER_TURN = 2, RITUAL_MIN_HP = 12;   // 血の儀式（修羅のあと）：HP2と手札1枚を払って、相手に4ダメージ
 const BLOOD = { SHURA_HEAL: 10, SHURA_CAP: 6, RAGE_STEP: 4 };   // 自傷デッキ用（修羅の回復量・溜めの上限、狂血の増え方）
 /* パックの奥義の数値（engine.py と同じ） */
@@ -37,7 +38,7 @@ const OUGI = {
   kodoku:    { name: "蠱毒",     desc: "相手に毒12＋以降、自分が与える毒と出血のダメージが3倍", charge: k => `毎ターン相手のHPに直接${k}` },
   kyoka:     { name: "鏡花水月", desc: "相手の攻撃カードを1回だけ1.5倍にして跳ね返せる（受けるときに選ぶ）",
                charge: k => `受ける攻撃-${Math.round(R.KYOKA_CUT * k * 100)}%・受けた半分を返す` },
-  shura:     { name: "修羅",     desc: `HP10回復＋以降、HP${RITUAL_HP}と手札1枚を払うたびに相手に${RITUAL_DMG}ダメージ`, charge: k => `HPを払うたび、次の攻撃+${k}（+${BLOOD.SHURA_CAP}まで）` },
+  shura:     { name: "修羅",     desc: `HP10回復＋以降、HP${RITUAL_HP}と手札1枚を払うたびに相手に${RITUAL_DMG}ダメージ`, charge: k => `HPを払うたび次の攻撃+${k}・毒や出血を受けるたび+${k * SHURA_DOT}（+${BLOOD.SHURA_CAP}まで）` },
   /* ここから下はカードパックで手に入る奥義 */
   kinu:      { name: "金烏",     desc: "陽光+2＋そのターンは影討ち（使えるカード3枚・与えるダメージ2倍）", charge: k => `昼カードを使うたびシールド+${k}` },
   gyokuto:   { name: "玉兎",     desc: `${NEW_OUGI.GYOKUTO_DMG}ダメージ＋相手の手札を1枚捨てさせる`, charge: k => `相手のターンの始めに相手のシールド-${NEW_OUGI.GYOKUTO_CHARGE * k}` },
@@ -571,6 +572,11 @@ class Game {
     const n = Math.floor(amount + 0.5);
     this.directHp(p, n, reason);
     if (this.players[this.turnIdx] === p) p.takenTurn = (p.takenTurn || 0) + n;   // 自分のターンの間に受けた分（ターン始めの毒のダメージなど）
+    const sk = charge(p, "shura") * SHURA_DOT;
+    if (sk && n > 0) {   // 修羅を溜めている間：毒・出血などの特殊ダメージを受けたときも、次の攻撃+k
+      p.shuraStore = Math.min(BLOOD.SHURA_CAP, (p.shuraStore || 0) + sk);
+      this.log(`修羅：特殊ダメージを受けて、次の攻撃+${p.shuraStore}`, "buff", this.idx(p));
+    }
     this.angerHit(p, n);
     this.waitHit(p, n);
     if (p.karmaTurns) p.karmaStore = (p.karmaStore || 0) + n;
