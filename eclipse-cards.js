@@ -214,7 +214,7 @@ const CARDS = {
   shinkokyu: { name: "深呼吸", attr: "none", type: "heal", power: 6, cure: true, cost: 1, recover: 2 },
   kamaitachi: { name: "かまいたち", attr: "night", type: "attack", power: 3, cost: 2, recover: 2 },
   hoshikuzu: { name: "星屑", attr: "none", type: "attack", power: 4, cost: 1, recover: 2 },
-  dokuchi:  { name: "毒血の一撃", attr: "night", type: "attack", power: 3, debuffbonus: 3, cost: 1, recover: 2 },
+  dokuchi:  { name: "毒血の一撃", attr: "night", type: "attack", power: 8, takenbonus: 1, cost: 2, recover: 2 },
   dokuhai:  { name: "毒杯",     attr: "night", type: "poisoncup", power: 2, turns: 3, cost: 0, recover: 2 },
   berserk:  { name: "狂乱",     attr: "night", type: "berserk", turns: 3, cost: 2, recover: 3 },
   dohatsu:  { name: "怒髪天",   attr: "night", type: "dohatsu", power: 2, turns: 3, wrathok: true, cost: 2, recover: 3 },
@@ -455,7 +455,7 @@ class Game {
     if (c.fury) power += 2 * (p.usedTurn || 0) + Math.floor((p.hpPaidTurn || 0) / 3);   // 血の連撃：このターン使ったカード・払ったHP
     if (c.rage) power += Math.floor(Math.max(0, R.MAX_HP - p.hp) / BLOOD.RAGE_STEP);
     if (p.berserkTurns) power += debuffs(p);   // 狂乱：自分のデバフの数だけ
-    if (c.debuffbonus) power += c.debuffbonus * debuffs(p);   // 毒血の一撃：自分のデバフ1つにつき+3（狂乱とは別に）
+    if (c.takenbonus) power += c.takenbonus * (p.takenTurn || 0);   // 毒血の一撃：このターンに相手から受けたダメージ（ターン始めの毒など）の分
     if (c.revenge) power += Math.floor((p.revengeBase || 0) * REVENGE_RATE);
     if (c.attr === "day") power += 2 * charge(p, "amaterasu");   // 天照を溜めている間：+2k
     power += p.shuraStore || 0;                                  // 修羅を溜めている間に、HPを払って溜めた分
@@ -515,7 +515,7 @@ class Game {
     t.shield -= ab;
     const th = amt - ab;
     t.hp -= th;
-    if (attacker) t.taken = (t.taken || 0) + amt;
+    if (attacker) { t.taken = (t.taken || 0) + amt; if (this.players[this.turnIdx] === t) t.takenTurn = (t.takenTurn || 0) + amt; }   // 自分のターンの間に受けた分も
     this.angerHit(t, amt);
     this.log(`${src} → ${t.name}に${amt}ダメージ（シールド-${ab}${th ? `、HP-${th}` : ""}）`, "dmg", this.idx(t), amt);
     this.checkDead();
@@ -570,6 +570,7 @@ class Game {
     if (p.dohatsuTurns) amount = Math.max(0, amount - (p.dohatsuCut || 0));   // 怒髪天：-2
     const n = Math.floor(amount + 0.5);
     this.directHp(p, n, reason);
+    if (this.players[this.turnIdx] === p) p.takenTurn = (p.takenTurn || 0) + n;   // 自分のターンの間に受けた分（ターン始めの毒のダメージなど）
     this.angerHit(p, n);
     this.waitHit(p, n);
     if (p.karmaTurns) p.karmaStore = (p.karmaStore || 0) + n;
@@ -1056,7 +1057,7 @@ class Game {
   }
   beginTurn(p) {
     this.log(`第${this.round}巡【${PHASE_JP[this.phase]}】${p.name}のターン`, "turn");
-    p.usedTurn = 0; p.hpPaidTurn = 0;
+    p.usedTurn = 0; p.hpPaidTurn = 0; p.takenTurn = 0;
     p.kageuchi = false; p.meikyo = false; p.ritualTurn = 0;
     p.dokumaku = 0; p.mimic = 0;   // 毒の膜・擬態は次の自分のターンまで
     for (const m of p.monsters) m.acted = false;   // モンスターは自分のターンごとに1回攻撃できる
@@ -1731,7 +1732,7 @@ function cardMain(p, c) {
     if (c.zeal) extra += "＋仏の怒りの溜め×2";
     if (c.wrathok) extra += "。怒り状態でも使える";
     if (c.healHp) extra += `使うとHP+${c.healHp}・シールド+${c.healSh || 0}（上限まで）`;
-    if (c.debuffbonus) extra += `自分のデバフ（今${debuffs(p)}）1つにつき+${c.debuffbonus}`;
+    if (c.takenbonus) extra += `このターンに相手から受けたダメージ（今${p.takenTurn || 0}）の分を足す`;
     if (c.paidbonus) extra += `払ったHP（今${p.hpPaidTurn || 0}＋${c.hpcost}）を足す`;
     if (c.fury) extra += `（このターン使った${p.usedTurn || 0}枚・払ったHP${p.hpPaidTurn || 0}で上がる）`;
     if (c.blind) extra += `＋相手を${c.blind}ターン暗闇（引いたカードが裏向き）`;
@@ -2034,7 +2035,7 @@ async function saveDeck(deck) {
 /* デッキ編集画面に出すカードの説明（試合中でなくても出せる固定の文） */
 function cardBrief(c, id = c.id) {   // カード一覧（CARDS）の中身には id が入っていないので、呼ぶ側から渡す
   switch (c.type) {
-    case "attack": return `${c.power}ダメージ${c.drain ? "・与ダメの半分HP回復" : ""}${c.recoil ? `・自分もHP-${c.recoil}` : ""}${c.eclipse ? "・日没と夜明けは2倍" : ""}${c.rage ? `・減ったHP${BLOOD.RAGE_STEP}ごとに+1` : ""}${c.hpcost ? `・HPを${c.hpcost}払う` : ""}${c.revenge ? "・前の相手ターンに受けたダメージの半分を上乗せ" : ""}${c.poison ? `・毒${c.poison}` : ""}${c.numbing ? "・相手の次のターン、使えるカード-1" : ""}${c.paralyze ? "・相手の次のターン、ドローできない" : ""}${c.blind ? `・相手を${c.blind}ターン暗闇（引いたカードが裏向き）` : ""}${c.allday ? "・昼でも夜でも1.5倍" : ""}${c.zeal ? "・仏の怒りの溜め×2を足す" : ""}${c.wrathok ? "・怒り状態でも使える" : ""}${c.fury ? "・このターン使ったカード1枚ごとに+2、払ったHP3ごとに+1" : ""}${c.healHp ? `・使うとHP+${c.healHp}・シールド+${c.healSh || 0}` : ""}${c.debuffbonus ? `・自分のデバフ1つにつき+${c.debuffbonus}` : ""}${c.paidbonus ? "・このターンに払ったHPの分だけ上乗せ" : ""}${c.attr === "both" ? "・昼でも夜でも1.5倍" : ""}${c.splash ? "・与えた分シールド回復" : ""}${c.frenzy ? "・HPが半分以下なら2倍" : ""}`;
+    case "attack": return `${c.power}ダメージ${c.drain ? "・与ダメの半分HP回復" : ""}${c.recoil ? `・自分もHP-${c.recoil}` : ""}${c.eclipse ? "・日没と夜明けは2倍" : ""}${c.rage ? `・減ったHP${BLOOD.RAGE_STEP}ごとに+1` : ""}${c.hpcost ? `・HPを${c.hpcost}払う` : ""}${c.revenge ? "・前の相手ターンに受けたダメージの半分を上乗せ" : ""}${c.poison ? `・毒${c.poison}` : ""}${c.numbing ? "・相手の次のターン、使えるカード-1" : ""}${c.paralyze ? "・相手の次のターン、ドローできない" : ""}${c.blind ? `・相手を${c.blind}ターン暗闇（引いたカードが裏向き）` : ""}${c.allday ? "・昼でも夜でも1.5倍" : ""}${c.zeal ? "・仏の怒りの溜め×2を足す" : ""}${c.wrathok ? "・怒り状態でも使える" : ""}${c.fury ? "・このターン使ったカード1枚ごとに+2、払ったHP3ごとに+1" : ""}${c.healHp ? `・使うとHP+${c.healHp}・シールド+${c.healSh || 0}` : ""}${c.takenbonus ? "・自分のターンに相手から受けたダメージ（ターン始めの毒など）の分を足す" : ""}${c.paidbonus ? "・このターンに払ったHPの分だけ上乗せ" : ""}${c.attr === "both" ? "・昼でも夜でも1.5倍" : ""}${c.splash ? "・与えた分シールド回復" : ""}${c.frenzy ? "・HPが半分以下なら2倍" : ""}`;
     case "draw": return `HPを${c.hpcost}払って${c.power}枚引く`;
     case "sutra": return "デッキから仏の怒りを1枚手札に加える";
     case "gassho": return `シールド+${c.power}。怒り状態でも使える`;
