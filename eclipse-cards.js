@@ -20,7 +20,7 @@ const PHASE_JP = { day: "昼", dusk: "日没", night: "夜", dawn: "夜明け" }
 const ATTR_JP = { day: "昼", night: "夜", none: "無", both: "昼夜" };   // both：昼でも夜でも1.5倍
 const TYPE_JP = { attack: "攻撃", heal: "HP回復", poison: "毒", bleed: "出血", counter: "反撃", summon: "召喚", bloodshield: "血の盾", regen: "再生",
   parry: "見切り", karma: "因果応報", thorns: "棘", corrode: "腐食", bloom: "毒の開花", convert: "属性変化",
-  draw: "ドロー", sutra: "サーチ", gassho: "シールド", linger: "毒", calm: "守り", dohatsu: "守り", berserk: "強化", koromo: "守り", wait: "反撃", dokumaku: "守り", mimic: "守り", sunshield: "シールド", shieldbreak: "シールド破壊", nembutsu: "シールド", guard: "守り", buddha: "奥義", ougi: "奥義" };
+  draw: "ドロー", sutra: "サーチ", gassho: "シールド", linger: "毒", calm: "守り", dohatsu: "守り", berserk: "強化", poisoncup: "強化", koromo: "守り", wait: "反撃", dokumaku: "守り", mimic: "守り", sunshield: "シールド", shieldbreak: "シールド破壊", nembutsu: "シールド", guard: "守り", buddha: "奥義", ougi: "奥義" };
 const MONSTER_EXPECT = 3;   // モンスターが倒されるまでに攻撃する回数の目安（AIの見積もり用）
 const REVENGE_RATE = 0.5;   // 報復：前の相手ターンに受けたダメージのこの割合を上乗せ
 const RITUAL_HP = 2, RITUAL_DMG = 4, RITUAL_PER_TURN = 2, RITUAL_MIN_HP = 12;   // 血の儀式（修羅のあと）：HP2と手札1枚を払って、相手に4ダメージ
@@ -214,6 +214,8 @@ const CARDS = {
   shinkokyu: { name: "深呼吸", attr: "none", type: "heal", power: 6, cure: true, cost: 1, recover: 2 },
   kamaitachi: { name: "かまいたち", attr: "night", type: "attack", power: 3, cost: 2, recover: 2 },
   hoshikuzu: { name: "星屑", attr: "none", type: "attack", power: 4, cost: 1, recover: 2 },
+  dokuchi:  { name: "毒血の一撃", attr: "night", type: "attack", power: 3, debuffbonus: 3, cost: 1, recover: 2 },
+  dokuhai:  { name: "毒杯",     attr: "night", type: "poisoncup", power: 2, turns: 3, cost: 0, recover: 2 },
   berserk:  { name: "狂乱",     attr: "night", type: "berserk", turns: 3, cost: 2, recover: 3 },
   dohatsu:  { name: "怒髪天",   attr: "night", type: "dohatsu", power: 2, turns: 3, wrathok: true, cost: 2, recover: 3 },
   shura:   { name: "修羅",       attr: "none",  type: "ougi",    cost: 0, recover: 0 },
@@ -231,7 +233,7 @@ const PRESETS = {
   buddha: { name: "仏の怒り", cards: {
     buddha: 4, sutra: 2, gassho: 2, kongo: 2, zazen: 2, fudoushin: 2, dohatsu: 2, nembutsu: 2, katsu: 2, kongoken: 2, myoo: 2, rakan: 1, niou: 2, counter: 3, heal: 3, firstaid: 3 } },
   blood: { name: "自傷", cards: {
-    bloodblade: 3, bloodlust: 2, recoil: 3, hissen: 3, chizome: 3, backsplash: 3, shuraken: 3, shura: 4, koumori: 2, berserk: 2, firstaid: 3, shinkokyu: 3, kyuuketsuki: 2 } },
+    bloodblade: 3, bloodlust: 2, recoil: 1, hissen: 3, chizome: 3, backsplash: 3, dokuchi: 3, bloodshield: 3, regen: 1, shura: 4, koumori: 2, berserk: 2, dokuhai: 1, heal: 2, firstaid: 3 } },
 };
 const DEFAULT_PRESET = "buddha";   // 最初に使うデッキ。保存データがおかしいときもこれに戻す
 const DECK = PRESETS[DEFAULT_PRESET].cards;
@@ -453,6 +455,7 @@ class Game {
     if (c.fury) power += 2 * (p.usedTurn || 0) + Math.floor((p.hpPaidTurn || 0) / 3);   // 血の連撃：このターン使ったカード・払ったHP
     if (c.rage) power += Math.floor(Math.max(0, R.MAX_HP - p.hp) / BLOOD.RAGE_STEP);
     if (p.berserkTurns) power += debuffs(p);   // 狂乱：自分のデバフの数だけ
+    if (c.debuffbonus) power += c.debuffbonus * debuffs(p);   // 毒血の一撃：自分のデバフ1つにつき+3（狂乱とは別に）
     if (c.revenge) power += Math.floor((p.revengeBase || 0) * REVENGE_RATE);
     if (c.attr === "day") power += 2 * charge(p, "amaterasu");   // 天照を溜めている間：+2k
     power += p.shuraStore || 0;                                  // 修羅を溜めている間に、HPを払って溜めた分
@@ -750,6 +753,10 @@ class Game {
     } else if (c.type === "wait") {
       p.waiting = true;
       this.log(`${p.name}は待ちの構えに入った（ダメージを受けるまでドローできない。受けたら${WAIT_MULT}倍で返す）`, "buff", this.idx(p));
+    } else if (c.type === "poisoncup") {   // 毒杯：自分に毒を付けて、そのかわり狂乱の状態になる
+      this.afflict(p, p, c.power);
+      p.berserkTurns = Math.max(p.berserkTurns || 0, c.turns);
+      this.log(`${p.name}は毒杯をあおった（自分に毒${c.power}。${c.turns}ターン、自分のデバフの数だけ攻撃+1。今は+${debuffs(p)}）`, "buff", this.idx(p));
     } else if (c.type === "berserk") {
       p.berserkTurns = c.turns;
       this.log(`${p.name}は狂乱した（${c.turns}ターン、自分のデバフの数だけ攻撃+1。今は+${debuffs(p)}）`, "buff", this.idx(p));
@@ -1246,6 +1253,10 @@ const AI = {
     if (c.type === "mimic") return p.mimic || p.parry ? null : 5 / Math.max(1, c.cost);
     if (c.type === "koromo") return p.koromoTurns || p.hp <= 15 ? null : 4 / Math.max(1, c.cost);   // HPに余裕があって、まだまとっていないとき
     if (c.type === "wait") return p.waiting || p.hand.length < 4 ? null : 4 / Math.max(1, c.cost);   // 手札が多くて、まだ待っていないとき
+    if (c.type === "poisoncup") {   // HPに余裕があって、攻撃カードが手札にあるとき（engine.py と同じ）
+      const atk = p.hand.filter(x => x.type === "attack" && x !== c).length;
+      return p.berserkTurns || p.hp <= 18 || atk < 2 ? null : (3 + atk) / Math.max(1, c.cost);
+    }
     if (c.type === "berserk") {   // デバフが多いほど、手札の攻撃が強くなる（engine.py と同じ）
       const hurt = debuffs(p) * p.hand.filter(x => x.type === "attack" && x !== c).length;
       return p.berserkTurns || hurt < 2 ? null : hurt / Math.max(1, c.cost);
@@ -1720,6 +1731,7 @@ function cardMain(p, c) {
     if (c.zeal) extra += "＋仏の怒りの溜め×2";
     if (c.wrathok) extra += "。怒り状態でも使える";
     if (c.healHp) extra += `使うとHP+${c.healHp}・シールド+${c.healSh || 0}（上限まで）`;
+    if (c.debuffbonus) extra += `自分のデバフ（今${debuffs(p)}）1つにつき+${c.debuffbonus}`;
     if (c.paidbonus) extra += `払ったHP（今${p.hpPaidTurn || 0}＋${c.hpcost}）を足す`;
     if (c.fury) extra += `（このターン使った${p.usedTurn || 0}枚・払ったHP${p.hpPaidTurn || 0}で上がる）`;
     if (c.blind) extra += `＋相手を${c.blind}ターン暗闇（引いたカードが裏向き）`;
@@ -1742,6 +1754,7 @@ function cardMain(p, c) {
   if (c.type === "mimic") return `<big>0</big>次に受ける攻撃を0にして、攻撃してきた相手に毒${c.poison}`;
   if (c.type === "koromo") return `<big>-${c.cut}</big>自分に毒${c.power}。${c.turns}ターン、受ける攻撃-${c.cut}`;
   if (c.type === "wait") return `<big>×${WAIT_MULT}</big>ダメージを受けるまでドローできない。次に受けたダメージを${WAIT_MULT}倍で返す`;
+  if (c.type === "poisoncup") return `<big>毒${c.power}</big>自分に毒${c.power}を付ける。そのかわり${c.turns}ターン、自分のデバフの数だけ攻撃+1`;
   if (c.type === "berserk") return `<big>+${debuffs(p)}</big>${c.turns}ターン、デバフの数だけ攻撃+1（毒は量の分）。返されるダメージは2倍`;
   if (c.type === "dohatsu") return `<big>-${c.power}</big>${c.turns}ターン受けるダメージ減。受けた2ごとに必殺技+1・HP+1。<b>怒り状態でも使える</b>`;
   if (c.type === "linger") return `<big>${c.turns}</big>ターンの間、相手のターンの始めに毒${c.power}`;
@@ -2021,7 +2034,7 @@ async function saveDeck(deck) {
 /* デッキ編集画面に出すカードの説明（試合中でなくても出せる固定の文） */
 function cardBrief(c, id = c.id) {   // カード一覧（CARDS）の中身には id が入っていないので、呼ぶ側から渡す
   switch (c.type) {
-    case "attack": return `${c.power}ダメージ${c.drain ? "・与ダメの半分HP回復" : ""}${c.recoil ? `・自分もHP-${c.recoil}` : ""}${c.eclipse ? "・日没と夜明けは2倍" : ""}${c.rage ? `・減ったHP${BLOOD.RAGE_STEP}ごとに+1` : ""}${c.hpcost ? `・HPを${c.hpcost}払う` : ""}${c.revenge ? "・前の相手ターンに受けたダメージの半分を上乗せ" : ""}${c.poison ? `・毒${c.poison}` : ""}${c.numbing ? "・相手の次のターン、使えるカード-1" : ""}${c.paralyze ? "・相手の次のターン、ドローできない" : ""}${c.blind ? `・相手を${c.blind}ターン暗闇（引いたカードが裏向き）` : ""}${c.allday ? "・昼でも夜でも1.5倍" : ""}${c.zeal ? "・仏の怒りの溜め×2を足す" : ""}${c.wrathok ? "・怒り状態でも使える" : ""}${c.fury ? "・このターン使ったカード1枚ごとに+2、払ったHP3ごとに+1" : ""}${c.healHp ? `・使うとHP+${c.healHp}・シールド+${c.healSh || 0}` : ""}${c.paidbonus ? "・このターンに払ったHPの分だけ上乗せ" : ""}${c.attr === "both" ? "・昼でも夜でも1.5倍" : ""}${c.splash ? "・与えた分シールド回復" : ""}${c.frenzy ? "・HPが半分以下なら2倍" : ""}`;
+    case "attack": return `${c.power}ダメージ${c.drain ? "・与ダメの半分HP回復" : ""}${c.recoil ? `・自分もHP-${c.recoil}` : ""}${c.eclipse ? "・日没と夜明けは2倍" : ""}${c.rage ? `・減ったHP${BLOOD.RAGE_STEP}ごとに+1` : ""}${c.hpcost ? `・HPを${c.hpcost}払う` : ""}${c.revenge ? "・前の相手ターンに受けたダメージの半分を上乗せ" : ""}${c.poison ? `・毒${c.poison}` : ""}${c.numbing ? "・相手の次のターン、使えるカード-1" : ""}${c.paralyze ? "・相手の次のターン、ドローできない" : ""}${c.blind ? `・相手を${c.blind}ターン暗闇（引いたカードが裏向き）` : ""}${c.allday ? "・昼でも夜でも1.5倍" : ""}${c.zeal ? "・仏の怒りの溜め×2を足す" : ""}${c.wrathok ? "・怒り状態でも使える" : ""}${c.fury ? "・このターン使ったカード1枚ごとに+2、払ったHP3ごとに+1" : ""}${c.healHp ? `・使うとHP+${c.healHp}・シールド+${c.healSh || 0}` : ""}${c.debuffbonus ? `・自分のデバフ1つにつき+${c.debuffbonus}` : ""}${c.paidbonus ? "・このターンに払ったHPの分だけ上乗せ" : ""}${c.attr === "both" ? "・昼でも夜でも1.5倍" : ""}${c.splash ? "・与えた分シールド回復" : ""}${c.frenzy ? "・HPが半分以下なら2倍" : ""}`;
     case "draw": return `HPを${c.hpcost}払って${c.power}枚引く`;
     case "sutra": return "デッキから仏の怒りを1枚手札に加える";
     case "gassho": return `シールド+${c.power}。怒り状態でも使える`;
@@ -2030,6 +2043,7 @@ function cardBrief(c, id = c.id) {   // カード一覧（CARDS）の中身に�
     case "mimic": return `次に受ける攻撃を0にして、攻撃してきた相手に毒${c.poison}`;
     case "koromo": return `自分に毒${c.power}。${c.turns}ターン、受ける攻撃-${c.cut}`;
     case "wait": return `ダメージを受けるまでドローできない。次に受けたダメージを${WAIT_MULT}倍で返す`;
+    case "poisoncup": return `自分に毒${c.power}を付ける。そのかわり${c.turns}ターン、自分のデバフの数だけ攻撃+1（狂乱の状態）`;
     case "berserk": return `${c.turns}ターン、自分のデバフの数だけ攻撃+1（毒・出血はその量だけ）。返されるダメージは2倍`;
     case "dohatsu": return `${c.turns}ターン、受けるダメージ-${c.power}。受けたダメージ2ごとに必殺技+1・HP+1。怒り状態でも使える`;
     case "linger": return `${c.turns}ターンの間、相手のターンの始めに毒${c.power}`;
