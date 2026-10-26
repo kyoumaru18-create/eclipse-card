@@ -223,9 +223,9 @@ const CARDS = {
 /* 見本デッキ（cards.json の decks と同じ） */
 const PRESETS = {
   sun: { name: "昼特化", cards: {
-    strike: 3, bomb: 3, sunwolf: 3, jab: 3, sunturn: 2, twilight: 3, zanshou: 3, nichirin: 3, regen: 3, heal: 3, firstaid: 3, amaterasu: 4 } },
+    strike: 3, bomb: 3, sunwolf: 3, sunturn: 2, twilight: 3, zanshou: 3, nichirin: 3, regen: 3, heal: 1, firstaid: 3, amaterasu: 4, raikou: 3, shuraken: 2 } },
   moon: { name: "夜特化", cards: {
-    slash: 3, ambush: 3, nightowl: 3, drain: 3, moonturn: 2, twilight: 3, oborozuki: 3, shingetsu: 3, bleed: 3, gassho: 1, needle: 2, firstaid: 3, tsukuyomi: 4 } },
+    slash: 3, ambush: 3, nightowl: 3, drain: 3, moonturn: 2, twilight: 3, oborozuki: 3, shingetsu: 3, bleed: 3, firstaid: 3, tsukuyomi: 4, mangetsu: 3 } },
   venom: { name: "状態異常", cards: {
     needle: 3, bleed: 3, moudoku: 2, mahi: 3, fang: 3, dokuhebi: 2, mushibami: 3, dokugumo: 2, dokumaku: 2, mimic: 2, dokuya: 2, koromo: 2, firstaid: 1, nemurikou: 2, kodoku: 4 } },
   counter: { name: "カウンター", cards: {
