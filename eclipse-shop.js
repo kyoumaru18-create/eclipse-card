@@ -167,6 +167,7 @@
     if (ng) return showHome(ng);
     showDialog(`<h2>AIと対戦</h2>
       <p>ポイントを賭けられる。勝つと賭けの<b>2倍＋${WIN_BONUS}pt</b>、負けると賭けは失って<b>+${PLAY_BONUS}pt</b>。所持 <b>${prof.points}pt</b>・上限 <b>${M.cap()}pt</b>。</p>
+      ${aiDeckPickerHTML()}
       <div class="bets">${M.betOptions().map(b => `<button class="btn${b ? "" : " sub"}" data-act="bet-ai" data-bet="${b}">${b ? `${b}pt賭ける` : "賭けずに遊ぶ"}</button>`).join("")}</div>
       ${capTable()}
       <button class="btn sub" data-act="close">やめる</button>`, "bet");

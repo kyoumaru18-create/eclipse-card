@@ -2303,6 +2303,15 @@ function showTutorial(i = 0) {
 }
 
 /* ===== AI対戦 ===== */
+/* AI戦の相手のデッキ："random"（毎回ランダム）か、見本デッキの名前（sun・moon・venom・counter・buddha・blood）。選んだものは覚えておく */
+let aiDeckKey = "random";
+try { const v = localStorage.getItem("eclipse-aideck"); if (v === "random" || PRESETS[v]) aiDeckKey = v; } catch {}
+function setAiDeck(k) { aiDeckKey = k === "random" || PRESETS[k] ? k : "random"; try { localStorage.setItem("eclipse-aideck", aiDeckKey); } catch {} }
+/* 「相手のデッキ」を選ぶチップ（AIと対戦の画面に出す） */
+function aiDeckPickerHTML() {
+  const chip = (k, label) => `<button type="button" class="aideck-chip${aiDeckKey === k ? " on" : ""}" data-act="ai-deck" data-k="${k}" aria-pressed="${aiDeckKey === k}">${label}</button>`;
+  return `<div class="aideck"><b>相手のデッキ</b><div class="aideck-row">${chip("random", "ランダム")}${Object.entries(PRESETS).map(([k, p]) => chip(k, p.name)).join("")}</div></div>`;
+}
 /* ネタカード（夜王の裁き など）が入っているデッキは、賭けなしのAI戦でしか使えない（ポイントやオンライン対戦で不正に勝てないように） */
 function jokeInDeck() { return Object.keys(myDeck.cards).some(id => CARDS[id]?.joke); }
 const JOKE_NG = "ネタカードが入っているデッキは、賭けなしのAI戦でしか使えない。デッキ編集で外そう。";
@@ -2312,7 +2321,7 @@ function startAI(bet = 0) {
   gameId++;
   mode = "ai"; seat = 0; busy = false;
   const keys = Object.keys(PRESETS);
-  const enemy = PRESETS[keys[Math.floor(Math.random() * keys.length)]];
+  const enemy = PRESETS[aiDeckKey] || PRESETS[keys[Math.floor(Math.random() * keys.length)]];   // 選んだデッキ。ランダムなら毎回くじ引き
   g = new Game({ ai: [false, true], firstIdx: Math.random() < 0.5 ? 0 : 1, decks: [myDeck.cards, enemy.cards], designated: [myDeck.designated, null],
                  cos: [window.Meta?.cos() || null, window.Meta?.aiCos() || null] });
   window.Meta?.escrow(g.gid, bet);
@@ -2756,6 +2765,10 @@ document.addEventListener("click", e => {
   else if (act === "moncancel") { monSel = null; render(); }
   else if (act === "trio") humanTrio(b.dataset.u.split(",").map(Number));
   else if (act === "ritual") humanRitual(+b.dataset.uid);
+  else if (act === "ai-deck") {   // AI戦の相手のデッキを選ぶ（画面を閉じずに、選んだチップを光らせる）
+    setAiDeck(b.dataset.k);
+    document.querySelectorAll(".aideck-chip").forEach(el => { const on = el.dataset.k === aiDeckKey; el.classList.toggle("on", on); el.setAttribute("aria-pressed", on); });
+  }
   else if (act === "newmoon") humanNewMoon();
   else if (act === "end") endMyTurn();
   else if (act === "close") hideDialog();

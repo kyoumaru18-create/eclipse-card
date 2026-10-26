@@ -661,6 +661,12 @@ div.prof-card { cursor: default; flex-wrap: wrap; }
 .col-arts { display: flex; flex-wrap: wrap; gap: 4px; }
 
 /* 賭け・はじめて・プロフィール */
+.aideck { display: grid; gap: 6px; }
+.aideck > b { font-size: 13px; color: #566070; }
+.aideck-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.aideck-chip { font: inherit; font-size: 13px; font-weight: 700; padding: 6px 12px; border-radius: 999px; border: 1px solid rgba(28,34,48,.25); background: #fff; color: #1c2230; cursor: pointer; }
+.aideck-chip.on { background: #b8611a; color: #fff; border-color: transparent; }
+.aideck-chip:focus-visible { outline: 3px solid #b8611a; outline-offset: 2px; }
 .bets { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .bets.small span { font-size: 13px; color: #566070; }
 .dialog .btn.on { background: #b8611a; color: #fff; border-color: transparent; }
