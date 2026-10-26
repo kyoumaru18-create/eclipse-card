@@ -23,6 +23,7 @@ const TYPE_JP = { attack: "攻撃", heal: "HP回復", poison: "毒", bleed: "出
   draw: "ドロー", sutra: "サーチ", gassho: "シールド", linger: "毒", calm: "守り", dohatsu: "守り", berserk: "強化", koromo: "守り", wait: "反撃", dokumaku: "守り", mimic: "守り", sunshield: "シールド", shieldbreak: "シールド破壊", nembutsu: "シールド", guard: "守り", buddha: "奥義", ougi: "奥義" };
 const MONSTER_EXPECT = 3;   // モンスターが倒されるまでに攻撃する回数の目安（AIの見積もり用）
 const REVENGE_RATE = 0.5;   // 報復：前の相手ターンに受けたダメージのこの割合を上乗せ
+const RITUAL_HP = 2, RITUAL_DMG = 4, RITUAL_PER_TURN = 2, RITUAL_MIN_HP = 12;   // 血の儀式（修羅のあと）：HP2と手札1枚を払って、相手に4ダメージ
 const BLOOD = { SHURA_HEAL: 10, SHURA_CAP: 6, RAGE_STEP: 4 };   // 自傷デッキ用（修羅の回復量・溜めの上限、狂血の増え方）
 /* パックの奥義の数値（engine.py と同じ） */
 const NEW_OUGI = { GYOKUTO_DMG: 16, GYOKUTO_CHARGE: 1, NEHAN_HEAL: 20, NEHAN_CHARGE: 1, MEIKYO_CHARGE: 3, MEIKYO_CUT: 5, CHIMATSURI_CHARGE: 2 };
@@ -36,7 +37,7 @@ const OUGI = {
   kodoku:    { name: "蠱毒",     desc: "相手に毒12＋以降、自分が与える毒と出血のダメージが3倍", charge: k => `毎ターン相手のHPに直接${k}` },
   kyoka:     { name: "鏡花水月", desc: "相手の攻撃カードを1回だけ1.5倍にして跳ね返せる（受けるときに選ぶ）",
                charge: k => `受ける攻撃-${Math.round(R.KYOKA_CUT * k * 100)}%・受けた半分を返す` },
-  shura:     { name: "修羅",     desc: "HP10回復＋そのターン、HPを払うカードは何枚でも使える", charge: k => `HPを払うたび、次の攻撃+${k}（+${BLOOD.SHURA_CAP}まで）` },
+  shura:     { name: "修羅",     desc: `HP10回復＋以降、HP${RITUAL_HP}と手札1枚を払うたびに相手に${RITUAL_DMG}ダメージ`, charge: k => `HPを払うたび、次の攻撃+${k}（+${BLOOD.SHURA_CAP}まで）` },
   /* ここから下はカードパックで手に入る奥義 */
   kinu:      { name: "金烏",     desc: "陽光+2＋そのターンは影討ち（使えるカード3枚・与えるダメージ2倍）", charge: k => `昼カードを使うたびシールド+${k}` },
   gyokuto:   { name: "玉兎",     desc: `${NEW_OUGI.GYOKUTO_DMG}ダメージ＋相手の手札を1枚捨てさせる`, charge: k => `相手のターンの始めに相手のシールド-${NEW_OUGI.GYOKUTO_CHARGE * k}` },
@@ -57,7 +58,7 @@ function monExtra(c) {
     + (c.mzeal ? "・仏の怒りの溜め1つごとに攻撃+1" : "") + (c.mdrain ? `・攻撃するたびHP+${c.mdrain}` : "") + (c.hpcost ? `・HPを${c.hpcost}払う` : "");
 }
 /* 1ターンに使える枚数に数えないカード（陽転・月転、モンスターのコール） */
-function uncounted(c, mode, p = null) { return mode === "use" && (!!c.free || c.type === "summon" || !!(p?.shuraTurn && c.hpcost)); }   // 修羅のターンはHPを払うカードも
+function uncounted(c, mode, p = null) { return mode === "use" && (!!c.free || c.type === "summon"); }
 function isOugi(c) { return c.type === "buddha" || c.type === "ougi"; }
 /* 秘奥：日没・夜明けに昼と夜の指定カードを同時に使うと1つ選べる。選べる候補はデッキのタイプで変わる */
 const BUFFS = {
@@ -312,7 +313,7 @@ function newPlayer(name, isAI, def, chosen, cos = null) {
            kyoka: false,       // 鏡花水月（相手の攻撃カードを1回だけ1.5倍で跳ね返せる）
            regen: 0, regenTurns: 0,   // 再生（毎ターンHP回復）
            shuraStore: 0,      // 修羅を溜めている間に、HPを払って溜めた分（次の攻撃に乗る）
-           shuraTurn: false,   // 修羅を撃ったターン（HPを払うカードは枚数に数えない）
+           shura: false, ritualTurn: 0,   // 修羅を撃った（以降、血の儀式が使える）・AI用：このターンに儀式を使った回数
            blessing: [],        // 天照・月読の加護（この属性のカードは常に1.5倍）
            kodoku: false,       // 蠱毒（自分が与える毒・出血が3倍）
            recoverHalf: false,  // 相手の月読（シールド回復量が半分）
@@ -907,9 +908,9 @@ class Game {
       this.log(`${o.name}に毒${R.KODOKU_POISON}。以降、${p.name}が与える毒と出血は${R.KODOKU_MULT}倍`, "buff");
       this.afflict(p, o, R.KODOKU_POISON);
     } else if (key === "shura") {
-      p.shuraTurn = true;
+      p.shura = true;
       this.heal(p, BLOOD.SHURA_HEAL, "修羅");
-      this.log(`このターン、${p.name}はHPを払うカードを何枚でも使える`, "buff");
+      this.log(`以降、${p.name}はHP${RITUAL_HP}と手札1枚を払うたびに、相手に${RITUAL_DMG}ダメージ`, "buff");
     } else if (key === "kinu") {
       p.polar = (p.polar || 0) + 2; p.kageuchi = true;
       this.log(`金烏：${p.name}は陽光+2（${p.polar}つ）。このターンは影討ち（使えるカード${KAGEUCHI_LIMIT}枚・与えるダメージ${KAGEUCHI_MULT}倍）`, "buff");
@@ -991,6 +992,21 @@ class Game {
   }
   newmoonReady(p) { return p.hiou === "night" && p.ownTurns === NEWMOON_TURN && !p.newmoonUsed && !this.over; }
   /* 新月：自分の12ターン目に1回だけ、相手とHPを入れ替える */
+  /* 血の儀式（修羅のあと）：HPと手札1枚（奥義以外）を払って、相手に4ダメージ。1ターンの枚数には数えない */
+  ritualReady(p) { return !!p.shura && !p.wrath && !this.over && !this.pending && p.hp > RITUAL_HP; }
+  ritual(p, uid) {
+    const c = p.hand.find(x => x.uid === uid);
+    if (!c || isOugi(c) || !this.ritualReady(p)) return false;
+    const o = this.opp(p), before = this.snap();
+    p.hand.splice(p.hand.indexOf(c), 1); delete c.hidden; p.drop.push(c);
+    this.log(`血の儀式：${p.name}はHP${RITUAL_HP}と${c.name}を捧げた`, "buff", this.idx(p));
+    this.directHp(p, RITUAL_HP, "血の儀式");
+    p.hpPaidTurn = (p.hpPaidTurn || 0) + RITUAL_HP;
+    this.bloodFeast(p);
+    if (!this.over) this.dealDamage(o, this.outgoing(p, RITUAL_DMG, 1), "血の儀式", p);
+    this.summary(`${p.name}の血の儀式`, before);
+    return true;
+  }
   newMoon(p) {
     if (!this.newmoonReady(p)) return false;
     const o = this.opp(p), before = this.snap();
@@ -1034,7 +1050,7 @@ class Game {
   beginTurn(p) {
     this.log(`第${this.round}巡【${PHASE_JP[this.phase]}】${p.name}のターン`, "turn");
     p.usedTurn = 0; p.hpPaidTurn = 0;
-    p.kageuchi = false; p.meikyo = false; p.shuraTurn = false;
+    p.kageuchi = false; p.meikyo = false; p.ritualTurn = 0;
     p.dokumaku = 0; p.mimic = 0;   // 毒の膜・擬態は次の自分のターンまで
     for (const m of p.monsters) m.acted = false;   // モンスターは自分のターンごとに1回攻撃できる
     const nk = NEW_OUGI.NEHAN_CHARGE * charge(p, "nehan");
@@ -1153,6 +1169,16 @@ class Game {
 /* ===== 敵AI（engine.py の SimpleAI と同じ考え方） ===== */
 const AI = {
   RESERVE: 6, LOW: 12,
+  /* 血の儀式に捧げるカード：HPに余裕があり、手札が3枚以上のとき、いちばん役に立たないカードを。1ターン2回まで */
+  ritualPick(g, p) {
+    if (!g.ritualReady(p) || (p.ritualTurn || 0) >= RITUAL_PER_TURN || p.hp <= RITUAL_MIN_HP || p.hand.length < 3) return null;
+    const pool = p.hand.filter(c => !isOugi(c) && !c.hidden);
+    if (!pool.length) return null;
+    const value = c => { const v = this.score(g, p, c); return (v ?? 0) + (c.type === "heal" && p.hp < R.MAX_HP - 6 ? 3 : 0); };
+    const c = pool.reduce((a, b) => (value(b) < value(a) ? b : a));
+    p.ritualTurn = (p.ritualTurn || 0) + 1;
+    return ["ritual", c.uid];
+  },
   /* 日蝕：捨てる3枚のほかに攻撃カードが2枚以上あるとき。月食：相手のHPとシールドが多いとき（engine.py の want_trio と同じ） */
   trioPick(g, p) {
     const cs = g.trioCards(p).filter(c => !c.hidden);
@@ -1282,15 +1308,8 @@ const AI = {
     const keep0 = this.reserved(p);   // モンスターは枚数に数えないので、出せるなら先に出す（engine.py と同じ）
     const mc = hand.find(c => c.type === "summon" && g.canPlay(p, c, "use") && p.shield - c.cost >= this.RESERVE && !keep0.has(c.uid) && this.score(g, p, c) != null);
     if (mc) return [mc.uid, "use"];
-    if (p.shuraTurn && (p.plays || 0) >= playLimit(p)) {   // 修羅のターン：HPを払うカードは枚数に数えないので使い切る（engine.py と同じ）
-      let best = null;
-      for (const c of hand) {
-        if (!c.hpcost || !g.canPlay(p, c, "use")) continue;
-        const v = this.score(g, p, c);
-        if (v != null && (!best || v > best[0])) best = [v, c.uid];
-      }
-      if (best) return [best[1], "use"];
-    }
+    const rit = this.ritualPick(g, p);   // 修羅のあと：いらないカードを捧げて4ダメージ（engine.py と同じ）
+    if (rit) return rit;
     if ((p.plays || 0) >= playLimit(p)) return null;   // 1ターンの枚数を使い切った（秘奥の同時使用だけは上で済ませてある）
     for (const c of hand)
       if (c.type === "attack" && g.preview(p, c) >= o.hp + o.shield && p.hp + p.shield > c.cost) return [c.uid, "use"];
@@ -1596,7 +1615,7 @@ function statusChips(p) {
   if (p.blessing.includes("night")) tag(good, "月読の加護", "夜カードが常に1.5倍");
   if (p.kodoku) tag(good, "蠱毒", `与える毒と出血が${R.KODOKU_MULT}倍`);
   if (p.shuraStore) tag(good, `修羅の溜め+${p.shuraStore}`, "次の攻撃に乗る");
-  if (p.shuraTurn) tag(good, "修羅", "このターン、HPを払うカードは何枚でも使える");
+  if (p.shura) tag(good, "修羅", `手札のカードの「捧げる」で、HP${RITUAL_HP}と手札1枚を払って相手に${RITUAL_DMG}ダメージ（何度でも・枚数に数えない）`);
   for (const b of BUFF_ORDER) if (p.buffs.has(b)) tag(good, BUFFS[b][0], BUFFS[b][1].replace("以降、", ""), "hiou");
   return { good, bad };
 }
@@ -1898,6 +1917,7 @@ function render() {
       <span class="c-btns">
         <button class="c-btn use${armed("use") ? " armed" : ""}" data-act="use" data-uid="${c.uid}" ${canUse ? "" : "disabled"}>${useLabel}</button>
         ${special ? "" : `<button class="c-btn rec${armed("recover") ? " armed" : ""}" data-act="rec" data-uid="${c.uid}" ${canRec ? "" : "disabled"}>${recLabel}</button>`}
+        ${me.shura && !special && g.ritualReady(me) && myTurn ? `<button class="c-btn rit" data-act="ritual" data-uid="${c.uid}" title="HP${RITUAL_HP}とこのカードを捧げて、相手に${RITUAL_DMG}ダメージ"><span>捧げる</span><span>HP-${RITUAL_HP}→${RITUAL_DMG}</span></button>` : ""}
       </span>
     </div>`;
   }).join("") || `<p style="margin:0;color:var(--muted)">手札がない</p>`;
@@ -2316,7 +2336,7 @@ async function runAITurn(id) {
     if (id !== gameId) return;
     const a = AI.pick(g, p);
     if (!a) break;
-    const ok = a[0] === "pair" ? g.playPair(p, a[1], a[2]) : a[0] === "trio" ? g.playTrio(p, a[1]) : a[0] === "newmoon" ? g.newMoon(p)
+    const ok = a[0] === "pair" ? g.playPair(p, a[1], a[2]) : a[0] === "trio" ? g.playTrio(p, a[1]) : a[0] === "newmoon" ? g.newMoon(p) : a[0] === "ritual" ? g.ritual(p, a[1])
       : a[0] === "mon" ? g.monsterAttack(p, a[1], a[2])
       : g.play(p, a[0], a[1], a[1] === "use" ? AI.chooseTarget(g, p, p.hand.find(c => c.uid === a[0])) : null);
     if (!ok) break;   // 使えないカードを選んだら、そのターンは終える（止まらないように）
@@ -2359,6 +2379,7 @@ function humanPlay(uid, m, target = null) {
 }
 function humanMon(uid, tuid) { monSel = null; if (myTurnNow() && g.monsterAttack(g.players[seat], uid, tuid)) afterMyAction(); else render(); }
 function humanPair(d, n) { if (myTurnNow() && g.playPair(g.players[seat], d, n)) afterMyAction(); }
+function humanRitual(uid) { if (myTurnNow() && g.ritual(g.players[seat], uid)) afterMyAction(); }
 function humanTrio(uids) { if (myTurnNow() && g.playTrio(g.players[seat], uids)) afterMyAction(); }
 function humanNewMoon() { if (myTurnNow() && g.newMoon(g.players[seat])) afterMyAction(); }
 async function endMyTurn() {
@@ -2734,6 +2755,7 @@ document.addEventListener("click", e => {
   else if (act === "monatk") humanMon(+b.dataset.m, b.dataset.t ? +b.dataset.t : null);
   else if (act === "moncancel") { monSel = null; render(); }
   else if (act === "trio") humanTrio(b.dataset.u.split(",").map(Number));
+  else if (act === "ritual") humanRitual(+b.dataset.uid);
   else if (act === "newmoon") humanNewMoon();
   else if (act === "end") endMyTurn();
   else if (act === "close") hideDialog();
