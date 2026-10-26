@@ -25,6 +25,7 @@ const MONSTER_EXPECT = 3;   // モンスターが倒されるまでに攻撃す�
 const REVENGE_RATE = 0.5;   // 報復：前の相手ターンに受けたダメージのこの割合を上乗せ
 const SHURA_DOT = 2;   // 修羅を溜めている間、毒・出血などの特殊ダメージを受けるたび、次の攻撃+（溜めた枚数×2）
 const RITUAL_HP = 2, RITUAL_DMG = 4, RITUAL_PER_TURN = 2, RITUAL_MIN_HP = 12;   // 血の儀式（修羅のあと）：HP2と手札1枚を払って、相手に4ダメージ
+const LOSTHP_STEP = 2, LOSTHP_CAP = 6;   // 自傷：HPを払う攻撃は、減っているHP2ごとにダメージ+1（最大+6）
 const BLOOD = { SHURA_HEAL: 10, SHURA_CAP: 6, RAGE_STEP: 4 };   // 自傷デッキ用（修羅の回復量・溜めの上限、狂血の増え方）
 /* パックの奥義の数値（engine.py と同じ） */
 const NEW_OUGI = { GYOKUTO_DMG: 16, GYOKUTO_CHARGE: 1, NEHAN_HEAL: 20, NEHAN_CHARGE: 1, MEIKYO_CHARGE: 3, MEIKYO_CUT: 5, CHIMATSURI_CHARGE: 2 };
@@ -132,8 +133,8 @@ const CARDS = {
   tsukuyomi:{ name: "月読",       attr: "none",  type: "ougi",    cost: 0, recover: 0 },
   kodoku:   { name: "蠱毒",       attr: "none",  type: "ougi",    cost: 0, recover: 0 },
   kyoka:    { name: "鏡花水月",   attr: "none",  type: "ougi",    cost: 0, recover: 0 },
-  bloodblade:  { name: "血刃",   attr: "night", type: "attack",      power: 6, hpcost: 4, cost: 0, recover: 4 },
-  bloodlust:   { name: "狂血",   attr: "night", type: "attack",      power: 4, rage: true, hpcost: 3, cost: 2, recover: 4 },
+  bloodblade:  { name: "血刃",   attr: "night", type: "attack",      power: 2, hpcost: 4, cost: 0, recover: 4 },
+  bloodlust:   { name: "狂血",   attr: "night", type: "attack",      power: 2, rage: true, hpcost: 3, cost: 2, recover: 4 },
   bloodshield: { name: "血の盾", attr: "day",   type: "bloodshield", power: 8, hpcost: 4, cost: 0, recover: 5 },
   regen:       { name: "再生",   attr: "day",   type: "regen",       power: 3, turns: 4, cost: 2, recover: 4 },
   parry:    { name: "見切り",   attr: "day",   type: "parry",   cost: 2, recover: 3 },
@@ -157,7 +158,7 @@ const CARDS = {
   moonturn: { name: "月転",     attr: "night", type: "convert", to: "night", free: true, draw: 1, cost: 1, recover: 2 },
   twilight: { name: "薄明の刃", attr: "both",  type: "attack",  power: 5, cost: 3, recover: 3 },
   bloodpact:  { name: "血の契約", attr: "night", type: "draw",   power: 2, hpcost: 5, cost: 0, recover: 3 },
-  backsplash: { name: "返り血",   attr: "day",   type: "attack", power: 5, splash: true, hpcost: 4, cost: 0, recover: 3 },
+  backsplash: { name: "返り血",   attr: "day",   type: "attack", power: 2, splash: true, hpcost: 4, cost: 0, recover: 3 },
   bloodwaltz: { name: "鮮血の舞", attr: "night", type: "attack", power: 4, frenzy: true, hpcost: 3, cost: 0, recover: 3 },
   sutra:    { name: "読経",     attr: "day",   type: "sutra",   cost: 1, recover: 3 },
   gassho:   { name: "合掌",     attr: "night", type: "gassho",  power: 5, wrathok: true, cost: 0, recover: 2 },
@@ -180,8 +181,8 @@ const CARDS = {
   meikyo:   { name: "明鏡止水", attr: "none",  type: "ougi",    cost: 0, recover: 0 },
   nehan:    { name: "涅槃",     attr: "none",  type: "ougi",    cost: 0, recover: 0 },
   chimatsuri: { name: "血祭り", attr: "none",  type: "ougi",    cost: 0, recover: 0 },
-  hissen:   { name: "緋の一閃", attr: "day",   type: "attack",  power: 6, hpcost: 5, cost: 0, recover: 3 },
-  chizome:  { name: "血染めの陽", attr: "day", type: "attack",  power: 2, paidbonus: true, hpcost: 3, cost: 0, recover: 3 },
+  hissen:   { name: "緋の一閃", attr: "day",   type: "attack",  power: 2, hpcost: 5, cost: 0, recover: 3 },
+  chizome:  { name: "血染めの陽", attr: "day", type: "attack",  power: 1, paidbonus: true, hpcost: 3, cost: 0, recover: 3 },
   raikou: { name: "雷光", attr: "day", type: "attack", power: 10, cost: 6, recover: 5 },
   youen: { name: "陽炎の盾", attr: "day", type: "sunshield", power: 6, cost: 1, recover: 3 },
   shishi: { name: "陽の獅子", attr: "day", type: "summon", power: 4, hp: 10, cost: 6, recover: 5 },
@@ -207,17 +208,17 @@ const CARDS = {
   bodai: { name: "菩提", attr: "day", type: "heal", power: 6, cure: true, wrathok: true, cost: 0, recover: 2 },
   goma: { name: "護摩", attr: "night", type: "guard", power: 6, wrathok: true, cost: 2, recover: 3 },
   jizo: { name: "地蔵", attr: "day", type: "summon", power: 3, hp: 14, cost: 4, recover: 4 },
-  chinoame: { name: "血の雨", attr: "night", type: "attack", power: 12, hpcost: 6, cost: 0, recover: 3 },
-  kyuuketsuki: { name: "吸血鬼の抱擁", attr: "night", type: "attack", power: 7, drain: true, hpcost: 3, cost: 0, recover: 3 },
+  chinoame: { name: "血の雨", attr: "night", type: "attack", power: 8, hpcost: 6, cost: 0, recover: 3 },
+  kyuuketsuki: { name: "吸血鬼の抱擁", attr: "night", type: "attack", power: 3, drain: true, hpcost: 3, cost: 0, recover: 3 },
   chinokabe: { name: "血の壁", attr: "day", type: "bloodshield", power: 12, hpcost: 6, cost: 0, recover: 5 },
-  shuraken: { name: "修羅の剣", attr: "day", type: "attack", power: 7, hpcost: 4, cost: 0, recover: 3 },
+  shuraken: { name: "修羅の剣", attr: "day", type: "attack", power: 3, hpcost: 4, cost: 0, recover: 3 },
   usuakari: { name: "薄明の剣", attr: "both", type: "attack", power: 7, cost: 4, recover: 4 },
   shinkokyu: { name: "深呼吸", attr: "none", type: "heal", power: 6, cure: true, cost: 1, recover: 2 },
   kamaitachi: { name: "かまいたち", attr: "night", type: "attack", power: 3, cost: 2, recover: 2 },
   hoshikuzu: { name: "星屑", attr: "none", type: "attack", power: 4, cost: 1, recover: 2 },
   dokuchi:  { name: "毒血の一撃", attr: "night", type: "attack", power: 8, takenbonus: 1, cost: 2, recover: 2 },
   dokuhai:  { name: "毒杯",     attr: "night", type: "poisoncup", power: 2, turns: 3, cost: 0, recover: 2 },
-  yuketsu: { name: "輸血", attr: "night", type: "heal", power: 10, cost: 1, recover: 3 },
+  yuketsu: { name: "輸血", attr: "night", type: "heal", power: 8, cost: 1, recover: 3 },
   chiregen: { name: "血の再生", attr: "night", type: "regen", power: 3, turns: 5, cost: 2, recover: 4 },
   berserk:  { name: "狂乱",     attr: "night", type: "berserk", turns: 3, cost: 2, recover: 3 },
   dohatsu:  { name: "怒髪天",   attr: "night", type: "dohatsu", power: 2, turns: 3, wrathok: true, cost: 2, recover: 3 },
@@ -456,6 +457,7 @@ class Game {
     if (c.zeal) power += 2 * charge(p, "buddha");   // 喝：仏の怒りの溜め×2
     if (c.paidbonus) power += p.hpPaidTurn || 0;   // 血染めの陽：このターンに払ったHPの分（このカードで払った分も入る）
     if (c.fury) power += 2 * (p.usedTurn || 0) + Math.floor((p.hpPaidTurn || 0) / 3);   // 血の連撃：このターン使ったカード・払ったHP
+    if (c.hpcost && !c.rage) power += Math.min(LOSTHP_CAP, Math.floor(Math.max(0, R.MAX_HP - p.hp) / LOSTHP_STEP));   // 減ったHP2ごとに+1
     if (c.rage) power += Math.floor(Math.max(0, R.MAX_HP - p.hp) / BLOOD.RAGE_STEP);
     if (p.berserkTurns) power += debuffs(p);   // 狂乱：自分のデバフの数だけ
     if (c.takenbonus) power += c.takenbonus * (p.takenTurn || 0);   // 毒血の一撃：このターンに相手から受けたダメージ（ターン始めの毒など）の分
@@ -1730,6 +1732,7 @@ function cardMain(p, c) {
     let extra = m > 1 ? `（${POLAR[p.hiou] ? POLAR[p.hiou].name : PHASE_JP[g.phase]}で${m}倍）` : "";
     if (c.drain) extra += "与ダメの半分HP回復";
     if (c.rage) extra += `減ったHP${BLOOD.RAGE_STEP}ごとに+1`;
+    if (c.hpcost && !c.rage) extra += `減ったHP${LOSTHP_STEP}ごとに+1（最大+${LOSTHP_CAP}）`;
     if (c.recoil) extra += `自分もHP-${c.recoil}`;
     if (c.eclipse && m === 1) extra += "日没・夜明けは2倍";
     if (c.revenge) extra += `前の相手ターンに受けたダメージ（${p.revengeBase || 0}）の半分を上乗せ`;
@@ -2043,7 +2046,7 @@ async function saveDeck(deck) {
 /* デッキ編集画面に出すカードの説明（試合中でなくても出せる固定の文） */
 function cardBrief(c, id = c.id) {   // カード一覧（CARDS）の中身には id が入っていないので、呼ぶ側から渡す
   switch (c.type) {
-    case "attack": return `${c.power}ダメージ${c.drain ? "・与ダメの半分HP回復" : ""}${c.recoil ? `・自分もHP-${c.recoil}` : ""}${c.eclipse ? "・日没と夜明けは2倍" : ""}${c.rage ? `・減ったHP${BLOOD.RAGE_STEP}ごとに+1` : ""}${c.hpcost ? `・HPを${c.hpcost}払う` : ""}${c.revenge ? "・前の相手ターンに受けたダメージの半分を上乗せ" : ""}${c.poison ? `・毒${c.poison}` : ""}${c.numbing ? "・相手の次のターン、使えるカード-1" : ""}${c.paralyze ? "・相手の次のターン、ドローできない" : ""}${c.blind ? `・相手を${c.blind}ターン暗闇（引いたカードが裏向き）` : ""}${c.allday ? "・昼でも夜でも1.5倍" : ""}${c.zeal ? "・仏の怒りの溜め×2を足す" : ""}${c.wrathok ? "・怒り状態でも使える" : ""}${c.fury ? "・このターン使ったカード1枚ごとに+2、払ったHP3ごとに+1" : ""}${c.healHp ? `・使うとHP+${c.healHp}・シールド+${c.healSh || 0}` : ""}${c.takenbonus ? "・自分のターンに相手から受けたダメージ（ターン始めの毒など）の分を足す" : ""}${c.paidbonus ? "・このターンに払ったHPの分だけ上乗せ" : ""}${c.attr === "both" ? "・昼でも夜でも1.5倍" : ""}${c.splash ? "・与えた分シールド回復" : ""}${c.frenzy ? "・HPが半分以下なら2倍" : ""}`;
+    case "attack": return `${c.power}ダメージ${c.drain ? "・与ダメの半分HP回復" : ""}${c.recoil ? `・自分もHP-${c.recoil}` : ""}${c.eclipse ? "・日没と夜明けは2倍" : ""}${c.rage ? `・減ったHP${BLOOD.RAGE_STEP}ごとに+1` : ""}${c.hpcost && !c.rage ? `・減ったHP${LOSTHP_STEP}ごとに+1（最大+${LOSTHP_CAP}）` : ""}${c.hpcost ? `・HPを${c.hpcost}払う` : ""}${c.revenge ? "・前の相手ターンに受けたダメージの半分を上乗せ" : ""}${c.poison ? `・毒${c.poison}` : ""}${c.numbing ? "・相手の次のターン、使えるカード-1" : ""}${c.paralyze ? "・相手の次のターン、ドローできない" : ""}${c.blind ? `・相手を${c.blind}ターン暗闇（引いたカードが裏向き）` : ""}${c.allday ? "・昼でも夜でも1.5倍" : ""}${c.zeal ? "・仏の怒りの溜め×2を足す" : ""}${c.wrathok ? "・怒り状態でも使える" : ""}${c.fury ? "・このターン使ったカード1枚ごとに+2、払ったHP3ごとに+1" : ""}${c.healHp ? `・使うとHP+${c.healHp}・シールド+${c.healSh || 0}` : ""}${c.takenbonus ? "・自分のターンに相手から受けたダメージ（ターン始めの毒など）の分を足す" : ""}${c.paidbonus ? "・このターンに払ったHPの分だけ上乗せ" : ""}${c.attr === "both" ? "・昼でも夜でも1.5倍" : ""}${c.splash ? "・与えた分シールド回復" : ""}${c.frenzy ? "・HPが半分以下なら2倍" : ""}`;
     case "draw": return `HPを${c.hpcost}払って${c.power}枚引く`;
     case "sutra": return "デッキから仏の怒りを1枚手札に加える";
     case "gassho": return `シールド+${c.power}。怒り状態でも使える`;
