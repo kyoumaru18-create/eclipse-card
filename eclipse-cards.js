@@ -138,6 +138,7 @@ const CARDS = {
   bloodblade:  { name: "血刃",   attr: "night", type: "attack",      power: 2, hpcost: 4, cost: 0, recover: 4 },
   bloodlust:   { name: "狂血",   attr: "night", type: "attack",      power: 2, rage: true, hpcost: 3, cost: 2, recover: 4 },
   bloodshield: { name: "血の盾", attr: "day",   type: "bloodshield", power: 8, hpcost: 4, cost: 0, recover: 5 },
+  gekko: { name: "月光", attr: "night", type: "regen", power: 4, turns: 4, overshield: true, cost: 2, recover: 3 },
   regen:       { name: "再生",   attr: "day",   type: "regen",       power: 3, turns: 4, cost: 2, recover: 4 },
   parry:    { name: "見切り",   attr: "day",   type: "parry",   cost: 2, recover: 3 },
   karma:    { name: "因果応報", attr: "night", type: "karma",   turns: 3, cost: 3, recover: 3 },
@@ -232,7 +233,7 @@ const PRESETS = {
   sun: { name: "昼特化", cards: {
     strike: 3, bomb: 3, sunwolf: 3, sunturn: 2, twilight: 3, zanshou: 3, nichirin: 3, regen: 3, heal: 1, firstaid: 3, amaterasu: 4, raikou: 3, shuraken: 2 } },
   moon: { name: "夜特化", cards: {
-    slash: 3, ambush: 3, nightowl: 3, drain: 3, moonturn: 2, twilight: 3, oborozuki: 3, shingetsu: 3, bleed: 3, firstaid: 3, tsukuyomi: 4, mangetsu: 3 } },
+    slash: 3, ambush: 3, nightowl: 3, drain: 3, moonturn: 2, twilight: 3, oborozuki: 3, shingetsu: 3, bleed: 3, gekko: 3, tsukuyomi: 4, mangetsu: 3 } },
   venom: { name: "状態異常", cards: {
     needle: 3, bleed: 3, moudoku: 2, mahi: 3, fang: 3, dokuhebi: 2, mushibami: 3, dokugumo: 2, dokumaku: 2, mimic: 2, dokuya: 2, koromo: 2, firstaid: 1, nemurikou: 2, kodoku: 4 } },
   counter: { name: "カウンター", cards: {
@@ -747,6 +748,7 @@ class Game {
     } else if (c.type === "regen") {
       p.regen = Math.max(p.regen || 0, c.power);
       p.regenTurns = Math.max(p.regenTurns || 0, c.turns);
+      if (c.overshield) p.regenOver = true;
       this.log(`${p.name}は再生を得た（${p.regenTurns}ターン、毎ターンHP+${p.regen}）`);
     } else if (c.type === "draw") {
       this.draw(p, c.power);
@@ -1118,8 +1120,15 @@ class Game {
     this.karmaTick(p);   // このターンの毒まで溜めてから返す
     if (this.over) return;
     if (p.regenTurns) {
+      const hb = p.hp;
       this.heal(p, p.regen, "再生");
-      if (!--p.regenTurns) p.regen = 0;
+      const over = hb + p.regen - p.hp;
+      const ro = p.regenOver;
+      if (!--p.regenTurns) { p.regen = 0; p.regenOver = false; }
+      if (over > 0 && ro) {
+        p.shield = Math.min(R.SHIELD_CAP, p.shield + over);
+        this.log(`月光：あふれた${over}がシールドになった（${p.name}）`, "buff", this.idx(p));
+      }
     }
     // 毎ターン始めに働く秘奥
     const o = this.opp(p);
@@ -1261,7 +1270,7 @@ const AI = {
     if (c.type === "attack" && c.recoil && p.hp <= 15 + c.recoil) return null;
     if (c.hpcost && p.hp <= c.hpcost + 12) return null;   // HPを払うカードは、HPに余裕があるときだけ
     if (c.type === "bloodshield") return p.shield <= 12 ? 3 : null;
-    if (c.type === "regen") return !p.regenTurns && p.hp <= R.MAX_HP - 6 ? 2.5 : null;
+    if (c.type === "regen") return c.overshield ? (!p.regenTurns ? 2.5 : null) : !p.regenTurns && p.hp <= R.MAX_HP - 6 ? 2.5 : null;
     if (["attack", "poison", "summon"].includes(c.type))   // 麻痺：相手が1ターン引けない分を足す（engine.py と同じ）
       return g.preview(p, c) / Math.max(1, c.cost + 0.7 * (c.hpcost || 0)) + (c.paralyze && !o.paralyzeNext ? 2 : 0);
     if (c.type === "bleed") return o.bleed ? null : 4 / c.cost;
@@ -1776,7 +1785,7 @@ function cardMain(p, c) {
   if (c.type === "bleed") return `<big>${c.power}</big>ターン出血。相手はカードを使うたびHP-${R.BLEED_DMG}${c.numbing ? "＋相手の次のターン、使えるカード-1" : ""}`;
   if (c.type === "counter") return `<big>½</big>次に受ける攻撃を半分にし、半分を返す${c.draw ? "。1枚引く" : ""}`;
   if (c.type === "bloodshield") return `<big>+${c.power}</big>HPを${c.hpcost}払ってシールドを増やす`;
-  if (c.type === "regen") return `<big>+${c.power}×${c.turns}</big>毎ターン始めにHP回復`;
+  if (c.type === "regen") return `<big>+${c.power}×${c.turns}</big>毎ターン始めにHP回復${c.overshield ? "。あふれた分はシールド" : ""}`;
   if (c.type === "draw") return `<big>${c.power}枚</big>HPを${c.hpcost}払って引く`;
   if (c.type === "sutra") return `<big>仏</big>デッキから仏の怒りを1枚手札へ（残り${p.deck.filter(x => x.id === "buddha").length}枚）`;
   if (c.type === "gassho") return `<big>+${c.power}</big>シールド回復。<b>怒り状態でも使える</b>`;
@@ -2095,7 +2104,7 @@ function cardBrief(c, id = c.id) {   // カード一覧（CARDS）の中身に�
     case "bleed": return `${c.power}ターン出血（カードを使うたびHP-${R.BLEED_DMG}）${c.numbing ? "・相手の次のターン、使えるカード-1" : ""}`;
     case "counter": return `次に受ける攻撃を半分にし、半分を返す${c.draw ? "。1枚引く" : ""}`;
     case "bloodshield": return `HPを${c.hpcost}払ってシールド+${c.power}`;
-    case "regen": return `${c.turns}ターンの間、毎ターンHP+${c.power}`;
+    case "regen": return `${c.turns}ターンの間、毎ターンHP+${c.power}${c.overshield ? "（あふれた分はシールドになる）" : ""}`;
     case "summon": return `場にコール：攻撃${c.power}・HP${c.hp}（ターン終了時に攻撃${monExtra(c)}。倒されるとドロップゾーンへ。使う枚数に数えない）`;
     case "buddha": case "ougi": return `溜めている間：${[1, 2, 3].map(k => OUGI[id]?.charge(k)).join(" → ")}。${R.OUGI_AT}枚目で必殺技：${OUGI[id]?.desc || ""}`;
   }
