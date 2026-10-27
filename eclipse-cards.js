@@ -25,8 +25,8 @@ const MONSTER_EXPECT = 3;   // モンスターが倒されるまでに攻撃す�
 const REVENGE_RATE = 0.5;   // 報復：前の相手ターンに受けたダメージのこの割合を上乗せ
 const SHURA_DOT = 2;   // 修羅を溜めている間、毒・出血などの特殊ダメージを受けるたび、次の攻撃+（溜めた枚数×2）
 const RITUAL_HP = 2, RITUAL_DMG = 4, RITUAL_PER_TURN = 2, RITUAL_MIN_HP = 12;   // 血の儀式（修羅のあと）：HP2と手札1枚を払って、相手に4ダメージ
-const TOSO_HP = 0.4, TOSO_MULT = 1.5, TOSO_HP2 = 12, TOSO_MULT2 = 2.5;   // 闘争：HPが4割を切ると与えるダメージ×1.5、HP12以下だと×2.5
-function tosoMult(p) { return !p.tosoTurns || p.hp >= R.MAX_HP * TOSO_HP ? 1 : p.hp <= TOSO_HP2 ? TOSO_MULT2 : TOSO_MULT; }
+const TOSO_HP = 16, TOSO_MULT = 1.5, TOSO_HP2 = 12, TOSO_MULT2 = 2.5;   // 闘争：HP16以下だと与えるダメージ×1.5、HP12以下だと×2.5
+function tosoMult(p) { return !p.tosoTurns || p.hp > TOSO_HP ? 1 : p.hp <= TOSO_HP2 ? TOSO_MULT2 : TOSO_MULT; }
 const LOSTHP_STEP = 2, LOSTHP_CAP = 6;   // 自傷：HPを払う攻撃は、減っているHP2ごとにダメージ+1（最大+6）
 const BLOOD = { SHURA_HEAL: 10, SHURA_CAP: 6, RAGE_STEP: 4 };   // 自傷デッキ用（修羅の回復量・溜めの上限、狂血の増え方）
 /* パックの奥義の数値（engine.py と同じ） */
@@ -618,8 +618,10 @@ class Game {
     this.heal(p, Math.floor(store * R.KARMA_HEAL), "因果応報");
     this.directHp(this.opp(p), back, "因果応報");
   }
-  directHp(p, n, reason) {
+  directHp(p, n, reason, survive = false) {
+    const before = p.hp;
     p.hp -= n;
+    if (survive && p.hp <= 0 && before > 0) p.hp = 1;   // 自傷（自分で払うHP）では死なない：HP1で耐える
     this.log(`${reason}で${p.name}のHP-${n}`, "dmg", this.idx(p), n);
     this.checkDead();
   }
@@ -699,7 +701,7 @@ class Game {
     if (this.over) return;
     if (charge(p, "kinu") && c.attr === "day") p.shield = Math.min(R.SHIELD_CAP, p.shield + charge(p, "kinu"));   // 金烏を溜めている間
     if (c.hpcost) {
-      this.directHp(p, c.hpcost, "血の代償");
+      this.directHp(p, c.hpcost, "血の代償", true);
       p.hpPaidTurn = (p.hpPaidTurn || 0) + c.hpcost;
       this.bloodFeast(p);
       if (this.over) return;
@@ -770,7 +772,7 @@ class Game {
       this.log(`${p.name}は待ちの構えに入った（ダメージを受けるまでドローできない。受けたら${WAIT_MULT}倍で返す）`, "buff", this.idx(p));
     } else if (c.type === "toso") {   // 闘争
       p.tosoTurns = c.turns;
-      this.log(`${p.name}は闘争した（${c.turns}ターンの間、HPが${TOSO_HP * 100}%を切っていると与えるダメージ×${TOSO_MULT}、HP${TOSO_HP2}以下だと×${TOSO_MULT2}）`, "buff", this.idx(p));
+      this.log(`${p.name}は闘争した（${c.turns}ターンの間、HP${TOSO_HP}以下だと与えるダメージ×${TOSO_MULT}、HP${TOSO_HP2}以下だと×${TOSO_MULT2}）`, "buff", this.idx(p));
     } else if (c.type === "poisoncup") {   // 毒杯：自分に毒を付けて、そのかわり狂乱の状態になる
       this.afflict(p, p, c.power);
       p.berserkTurns = Math.max(p.berserkTurns || 0, c.turns);
@@ -853,7 +855,7 @@ class Game {
       p.shield = Math.min(R.SHIELD_CAP, p.shield + dealt);
       this.log(`返り血で${p.name}のシールド ${b}→${p.shield}`, "shield", a.atk, p.shield - b);
     }
-    if (a.recoil) this.directHp(p, a.recoil, "捨て身の反動");
+    if (a.recoil) this.directHp(p, a.recoil, "捨て身の反動", true);
     if (a.poison && !this.over && a.mon == null) {   // 毒牙
       this.afflict(p, o, a.poison + (p.buffs.has("virulent") ? 2 : 0));
     }
@@ -1025,7 +1027,7 @@ class Game {
     const o = this.opp(p), before = this.snap();
     p.hand.splice(p.hand.indexOf(c), 1); delete c.hidden; p.drop.push(c);
     this.log(`血の儀式：${p.name}はHP${RITUAL_HP}と${c.name}を捧げた`, "buff", this.idx(p));
-    this.directHp(p, RITUAL_HP, "血の儀式");
+    this.directHp(p, RITUAL_HP, "血の儀式", true);
     p.hpPaidTurn = (p.hpPaidTurn || 0) + RITUAL_HP;
     this.bloodFeast(p);
     if (!this.over) this.dealDamage(o, this.outgoing(p, RITUAL_DMG, 1), "血の儀式", p);
@@ -1631,7 +1633,7 @@ function statusChips(p) {
   if (p.mimic) tag(good, "擬態", `次に受ける攻撃を0にして、相手に毒${p.mimic}`);
   if (p.koromoTurns) tag(good, `毒の衣 残${p.koromoTurns}`, `受ける攻撃-${p.koromoCut}`);
   if (p.waiting) tag(good, "待ちの構え", `ドローできない・次に受けたダメージを${WAIT_MULT}倍で返す`);
-  if (p.tosoTurns) tag(good, `闘争 残${p.tosoTurns}`, tosoMult(p) > 1 ? `HP${p.hp}：与えるダメージ×${tosoMult(p)}（いま発動中）` : `HPが${Math.ceil(R.MAX_HP * TOSO_HP) - 1}以下で×${TOSO_MULT}、${TOSO_HP2}以下で×${TOSO_MULT2}`);
+  if (p.tosoTurns) tag(good, `闘争 残${p.tosoTurns}`, tosoMult(p) > 1 ? `HP${p.hp}：与えるダメージ×${tosoMult(p)}（いま発動中）` : `HP${TOSO_HP}以下で×${TOSO_MULT}、${TOSO_HP2}以下で×${TOSO_MULT2}`);
   if (p.berserkTurns) tag(good, `狂乱 残${p.berserkTurns}`, `攻撃+${debuffs(p)}（デバフの数）・返されるダメージ2倍`);
   if (p.dohatsuTurns) tag(good, `怒髪天 残${p.dohatsuTurns}`, `受けるダメージ-${p.dohatsuCut}・溜め${Math.floor((p.anger || 0) / DOHATSU_PER)}（必殺技に上乗せ）`);
   else if (p.anger >= DOHATSU_PER) tag(good, "怒りの溜め", `必殺技+${Math.floor(p.anger / DOHATSU_PER)}`);
@@ -1779,7 +1781,7 @@ function cardMain(p, c) {
   if (c.type === "mimic") return `<big>0</big>次に受ける攻撃を0にして、攻撃してきた相手に毒${c.poison}`;
   if (c.type === "koromo") return `<big>-${c.cut}</big>自分に毒${c.power}。${c.turns}ターン、受ける攻撃-${c.cut}`;
   if (c.type === "wait") return `<big>×${WAIT_MULT}</big>ダメージを受けるまでドローできない。次に受けたダメージを${WAIT_MULT}倍で返す`;
-  if (c.type === "toso") return `<big>×${TOSO_MULT2}</big>${c.turns}ターン、HPが4割を切ると与えるダメージ×${TOSO_MULT}、HP${TOSO_HP2}以下だと×${TOSO_MULT2}`;
+  if (c.type === "toso") return `<big>×${TOSO_MULT2}</big>${c.turns}ターン、HP16以下だと与えるダメージ×${TOSO_MULT}、HP${TOSO_HP2}以下だと×${TOSO_MULT2}`;
   if (c.type === "poisoncup") return `<big>毒${c.power}</big>自分に毒${c.power}を付ける。そのかわり${c.turns}ターン、自分のデバフの数だけ攻撃+1`;
   if (c.type === "berserk") return `<big>+${debuffs(p)}</big>${c.turns}ターン、デバフの数だけ攻撃+1（毒は量の分）。返されるダメージは2倍`;
   if (c.type === "dohatsu") return `<big>-${c.power}</big>${c.turns}ターン受けるダメージ減。受けた2ごとに必殺技+1・HP+1。<b>怒り状態でも使える</b>`;
@@ -2069,7 +2071,7 @@ function cardBrief(c, id = c.id) {   // カード一覧（CARDS）の中身に�
     case "mimic": return `次に受ける攻撃を0にして、攻撃してきた相手に毒${c.poison}`;
     case "koromo": return `自分に毒${c.power}。${c.turns}ターン、受ける攻撃-${c.cut}`;
     case "wait": return `ダメージを受けるまでドローできない。次に受けたダメージを${WAIT_MULT}倍で返す`;
-    case "toso": return `${c.turns}ターン、HPが4割を切ると与えるダメージ×${TOSO_MULT}、HP${TOSO_HP2}以下だと×${TOSO_MULT2}`;
+    case "toso": return `${c.turns}ターン、HP16以下だと与えるダメージ×${TOSO_MULT}、HP${TOSO_HP2}以下だと×${TOSO_MULT2}`;
     case "poisoncup": return `自分に毒${c.power}を付ける。そのかわり${c.turns}ターン、自分のデバフの数だけ攻撃+1（狂乱の状態）`;
     case "berserk": return `${c.turns}ターン、自分のデバフの数だけ攻撃+1（毒・出血はその量だけ）。返されるダメージは2倍`;
     case "dohatsu": return `${c.turns}ターン、受けるダメージ-${c.power}。受けたダメージ2ごとに必殺技+1・HP+1。怒り状態でも使える`;
