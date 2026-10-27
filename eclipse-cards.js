@@ -20,11 +20,12 @@ const PHASE_JP = { day: "昼", dusk: "日没", night: "夜", dawn: "夜明け" }
 const ATTR_JP = { day: "昼", night: "夜", none: "無", both: "昼夜" };   // both：昼でも夜でも1.5倍
 const TYPE_JP = { attack: "攻撃", heal: "HP回復", poison: "毒", bleed: "出血", counter: "反撃", summon: "召喚", bloodshield: "血の盾", regen: "再生",
   parry: "見切り", karma: "因果応報", thorns: "棘", corrode: "腐食", bloom: "毒の開花", convert: "属性変化",
-  draw: "ドロー", sutra: "サーチ", gassho: "シールド", linger: "毒", calm: "守り", dohatsu: "守り", berserk: "強化", poisoncup: "強化", koromo: "守り", wait: "反撃", dokumaku: "守り", mimic: "守り", sunshield: "シールド", shieldbreak: "シールド破壊", nembutsu: "シールド", guard: "守り", buddha: "奥義", ougi: "奥義" };
+  draw: "ドロー", sutra: "サーチ", gassho: "シールド", linger: "毒", calm: "守り", dohatsu: "守り", berserk: "強化", poisoncup: "強化", toso: "強化", koromo: "守り", wait: "反撃", dokumaku: "守り", mimic: "守り", sunshield: "シールド", shieldbreak: "シールド破壊", nembutsu: "シールド", guard: "守り", buddha: "奥義", ougi: "奥義" };
 const MONSTER_EXPECT = 3;   // モンスターが倒されるまでに攻撃する回数の目安（AIの見積もり用）
 const REVENGE_RATE = 0.5;   // 報復：前の相手ターンに受けたダメージのこの割合を上乗せ
 const SHURA_DOT = 2;   // 修羅を溜めている間、毒・出血などの特殊ダメージを受けるたび、次の攻撃+（溜めた枚数×2）
 const RITUAL_HP = 2, RITUAL_DMG = 4, RITUAL_PER_TURN = 2, RITUAL_MIN_HP = 12;   // 血の儀式（修羅のあと）：HP2と手札1枚を払って、相手に4ダメージ
+const TOSO_HP = 0.4, TOSO_MULT = 1.5;   // 闘争：HPが4割を切っている間、与えるダメージが1.5倍
 const LOSTHP_STEP = 2, LOSTHP_CAP = 6;   // 自傷：HPを払う攻撃は、減っているHP2ごとにダメージ+1（最大+6）
 const BLOOD = { SHURA_HEAL: 10, SHURA_CAP: 6, RAGE_STEP: 4 };   // 自傷デッキ用（修羅の回復量・溜めの上限、狂血の増え方）
 /* パックの奥義の数値（engine.py と同じ） */
@@ -216,6 +217,7 @@ const CARDS = {
   shinkokyu: { name: "深呼吸", attr: "none", type: "heal", power: 6, cure: true, cost: 1, recover: 2 },
   kamaitachi: { name: "かまいたち", attr: "night", type: "attack", power: 3, cost: 2, recover: 2 },
   hoshikuzu: { name: "星屑", attr: "none", type: "attack", power: 4, cost: 1, recover: 2 },
+  toso:     { name: "闘争",     attr: "night", type: "toso", turns: 4, cost: 1, recover: 3 },
   dokuchi:  { name: "毒血の一撃", attr: "night", type: "attack", power: 8, takenbonus: 1, cost: 2, recover: 2 },
   dokuhai:  { name: "毒杯",     attr: "night", type: "poisoncup", power: 2, turns: 3, cost: 0, recover: 2 },
   yuketsu: { name: "輸血", attr: "night", type: "heal", power: 8, cost: 1, recover: 3 },
@@ -237,7 +239,7 @@ const PRESETS = {
   buddha: { name: "仏の怒り", cards: {
     buddha: 4, sutra: 2, gassho: 2, kongo: 2, zazen: 2, fudoushin: 2, dohatsu: 2, nembutsu: 2, katsu: 2, kongoken: 2, myoo: 2, rakan: 1, niou: 2, counter: 3, heal: 3, firstaid: 3 } },
   blood: { name: "自傷", cards: {
-    bloodblade: 3, bloodlust: 2, recoil: 1, hissen: 3, chizome: 3, backsplash: 3, dokuchi: 3, bloodshield: 3, regen: 1, shura: 4, koumori: 2, berserk: 2, dokuhai: 1, yuketsu: 3, chiregen: 2 } },
+    bloodblade: 3, bloodlust: 2, recoil: 1, hissen: 3, chizome: 3, backsplash: 3, dokuchi: 3, bloodshield: 3, shura: 4, koumori: 1, berserk: 2, toso: 3, yuketsu: 3, chiregen: 2 } },
 };
 const DEFAULT_PRESET = "buddha";   // 最初に使うデッキ。保存データがおかしいときもこれに戻す
 const DECK = PRESETS[DEFAULT_PRESET].cards;
@@ -433,6 +435,7 @@ class Game {
   outgoing(p, base, mult) {
     let d = base * mult * this.escalation();
     if (p.kageuchi) d *= KAGEUCHI_MULT;   // 日蝕（影討ち）
+    if (p.tosoTurns && p.hp < R.MAX_HP * TOSO_HP) d *= TOSO_MULT;   // 闘争：HPが4割を切っている間
     if (p.buffs.has("attack")) d *= R.ATK_BUFF;
     return d;
   }
@@ -764,6 +767,9 @@ class Game {
     } else if (c.type === "wait") {
       p.waiting = true;
       this.log(`${p.name}は待ちの構えに入った（ダメージを受けるまでドローできない。受けたら${WAIT_MULT}倍で返す）`, "buff", this.idx(p));
+    } else if (c.type === "toso") {   // 闘争
+      p.tosoTurns = c.turns;
+      this.log(`${p.name}は闘争した（${c.turns}ターンの間、HPが${TOSO_HP * 100}%を切っていると与えるダメージ×${TOSO_MULT}）`, "buff", this.idx(p));
     } else if (c.type === "poisoncup") {   // 毒杯：自分に毒を付けて、そのかわり狂乱の状態になる
       this.afflict(p, p, c.power);
       p.berserkTurns = Math.max(p.berserkTurns || 0, c.turns);
@@ -1102,6 +1108,7 @@ class Game {
     p.calm = false;   // 不動心は、このターンの毒を受けたところまで
     if (p.dohatsuTurns) p.dohatsuTurns--;   // 怒髪天も、このターンの毒を受けたところで1ターン進む
     if (p.koromoTurns) p.koromoTurns--;   // 毒の衣も同じ
+    if (p.tosoTurns) p.tosoTurns--;   // 闘争も同じ
     if (p.berserkTurns) p.berserkTurns--;   // 狂乱も同じ
     this.karmaTick(p);   // このターンの毒まで溜めてから返す
     if (this.over) return;
@@ -1264,6 +1271,10 @@ const AI = {
     if (c.type === "mimic") return p.mimic || p.parry ? null : 5 / Math.max(1, c.cost);
     if (c.type === "koromo") return p.koromoTurns || p.hp <= 15 ? null : 4 / Math.max(1, c.cost);   // HPに余裕があって、まだまとっていないとき
     if (c.type === "wait") return p.waiting || p.hand.length < 4 ? null : 4 / Math.max(1, c.cost);   // 手札が多くて、まだ待っていないとき
+    if (c.type === "toso") {   // まだ闘争していなくて、攻撃カードが手札に2枚以上あるとき（engine.py と同じ）
+      const atk = p.hand.filter(x => x.type === "attack" && x !== c).length;
+      return p.tosoTurns || atk < 2 ? null : (3 + (p.hp < R.MAX_HP * 0.6 ? 2 : 0)) / Math.max(1, c.cost);
+    }
     if (c.type === "poisoncup") {   // HPに余裕があって、攻撃カードが手札にあるとき（engine.py と同じ）
       const atk = p.hand.filter(x => x.type === "attack" && x !== c).length;
       return p.berserkTurns || p.hp <= 18 || atk < 2 ? null : (3 + atk) / Math.max(1, c.cost);
@@ -1619,6 +1630,7 @@ function statusChips(p) {
   if (p.mimic) tag(good, "擬態", `次に受ける攻撃を0にして、相手に毒${p.mimic}`);
   if (p.koromoTurns) tag(good, `毒の衣 残${p.koromoTurns}`, `受ける攻撃-${p.koromoCut}`);
   if (p.waiting) tag(good, "待ちの構え", `ドローできない・次に受けたダメージを${WAIT_MULT}倍で返す`);
+  if (p.tosoTurns) tag(good, `闘争 残${p.tosoTurns}`, p.hp < R.MAX_HP * TOSO_HP ? `HP4割未満：与えるダメージ×${TOSO_MULT}（いま発動中）` : `HPが${Math.floor(R.MAX_HP * TOSO_HP)}より減ると、与えるダメージ×${TOSO_MULT}`);
   if (p.berserkTurns) tag(good, `狂乱 残${p.berserkTurns}`, `攻撃+${debuffs(p)}（デバフの数）・返されるダメージ2倍`);
   if (p.dohatsuTurns) tag(good, `怒髪天 残${p.dohatsuTurns}`, `受けるダメージ-${p.dohatsuCut}・溜め${Math.floor((p.anger || 0) / DOHATSU_PER)}（必殺技に上乗せ）`);
   else if (p.anger >= DOHATSU_PER) tag(good, "怒りの溜め", `必殺技+${Math.floor(p.anger / DOHATSU_PER)}`);
@@ -1766,6 +1778,7 @@ function cardMain(p, c) {
   if (c.type === "mimic") return `<big>0</big>次に受ける攻撃を0にして、攻撃してきた相手に毒${c.poison}`;
   if (c.type === "koromo") return `<big>-${c.cut}</big>自分に毒${c.power}。${c.turns}ターン、受ける攻撃-${c.cut}`;
   if (c.type === "wait") return `<big>×${WAIT_MULT}</big>ダメージを受けるまでドローできない。次に受けたダメージを${WAIT_MULT}倍で返す`;
+  if (c.type === "toso") return `<big>×${TOSO_MULT}</big>${c.turns}ターン、HPが4割（${Math.floor(R.MAX_HP * TOSO_HP)}）を切っている間、与えるダメージ×${TOSO_MULT}`;
   if (c.type === "poisoncup") return `<big>毒${c.power}</big>自分に毒${c.power}を付ける。そのかわり${c.turns}ターン、自分のデバフの数だけ攻撃+1`;
   if (c.type === "berserk") return `<big>+${debuffs(p)}</big>${c.turns}ターン、デバフの数だけ攻撃+1（毒は量の分）。返されるダメージは2倍`;
   if (c.type === "dohatsu") return `<big>-${c.power}</big>${c.turns}ターン受けるダメージ減。受けた2ごとに必殺技+1・HP+1。<b>怒り状態でも使える</b>`;
@@ -2055,6 +2068,7 @@ function cardBrief(c, id = c.id) {   // カード一覧（CARDS）の中身に�
     case "mimic": return `次に受ける攻撃を0にして、攻撃してきた相手に毒${c.poison}`;
     case "koromo": return `自分に毒${c.power}。${c.turns}ターン、受ける攻撃-${c.cut}`;
     case "wait": return `ダメージを受けるまでドローできない。次に受けたダメージを${WAIT_MULT}倍で返す`;
+    case "toso": return `${c.turns}ターン、HPが4割を切っている間、与えるダメージ×${TOSO_MULT}`;
     case "poisoncup": return `自分に毒${c.power}を付ける。そのかわり${c.turns}ターン、自分のデバフの数だけ攻撃+1（狂乱の状態）`;
     case "berserk": return `${c.turns}ターン、自分のデバフの数だけ攻撃+1（毒・出血はその量だけ）。返されるダメージは2倍`;
     case "dohatsu": return `${c.turns}ターン、受けるダメージ-${c.power}。受けたダメージ2ごとに必殺技+1・HP+1。怒り状態でも使える`;
