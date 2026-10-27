@@ -18,7 +18,7 @@ const PHASE_ROUNDS = 3;   // 昼・夜それぞれの巡数
 const CYCLE = [...Array(PHASE_ROUNDS).fill("day"), "dusk", ...Array(PHASE_ROUNDS).fill("night"), "dawn"];
 const PHASE_JP = { day: "昼", dusk: "日没", night: "夜", dawn: "夜明け" };
 const ATTR_JP = { day: "昼", night: "夜", none: "無", both: "昼夜" };   // both：昼でも夜でも1.5倍
-const TYPE_JP = { attack: "攻撃", heal: "HP回復", poison: "毒", bleed: "出血", counter: "反撃", summon: "召喚", bloodshield: "血の盾", regen: "再生",
+const TYPE_JP = { attack: "攻撃", heal: "HP回復", poison: "毒", bleed: "出血", counter: "反撃", summon: "召喚", bloodshield: "血の盾", regen: "再生", drought: "日照り",
   parry: "見切り", karma: "因果応報", thorns: "棘", corrode: "腐食", bloom: "毒の開花", convert: "属性変化",
   draw: "ドロー", sutra: "サーチ", gassho: "シールド", linger: "毒", calm: "守り", dohatsu: "守り", berserk: "強化", poisoncup: "強化", toso: "強化", koromo: "守り", wait: "反撃", dokumaku: "守り", mimic: "守り", sunshield: "シールド", shieldbreak: "シールド破壊", nembutsu: "シールド", guard: "守り", buddha: "奥義", ougi: "奥義" };
 const MONSTER_EXPECT = 3;   // モンスターが倒されるまでに攻撃する回数の目安（AIの見積もり用）
@@ -138,6 +138,7 @@ const CARDS = {
   bloodblade:  { name: "血刃",   attr: "night", type: "attack",      power: 2, hpcost: 4, cost: 0, recover: 4 },
   bloodlust:   { name: "狂血",   attr: "night", type: "attack",      power: 2, rage: true, hpcost: 3, cost: 2, recover: 4 },
   bloodshield: { name: "血の盾", attr: "day",   type: "bloodshield", power: 8, hpcost: 4, cost: 0, recover: 5 },
+  hideri: { name: "日照り", attr: "day", type: "drought", power: 4, turns: 3, heal: 4, cost: 2, recover: 3 },
   gekko: { name: "月光", attr: "night", type: "regen", power: 4, turns: 4, overshield: true, cost: 2, recover: 3 },
   regen:       { name: "再生",   attr: "day",   type: "regen",       power: 3, turns: 4, cost: 2, recover: 4 },
   parry:    { name: "見切り",   attr: "day",   type: "parry",   cost: 2, recover: 3 },
@@ -231,7 +232,7 @@ const CARDS = {
 /* 見本デッキ（cards.json の decks と同じ） */
 const PRESETS = {
   sun: { name: "昼特化", cards: {
-    strike: 3, bomb: 3, sunwolf: 3, sunturn: 2, twilight: 3, zanshou: 3, nichirin: 3, regen: 3, heal: 1, firstaid: 3, amaterasu: 4, raikou: 3, shuraken: 2 } },
+    strike: 3, bomb: 3, sunwolf: 3, sunturn: 2, twilight: 3, zanshou: 3, nichirin: 3, regen: 1, heal: 1, firstaid: 1, hideri: 4, amaterasu: 4, raikou: 3, shuraken: 2 } },
   moon: { name: "夜特化", cards: {
     slash: 3, ambush: 3, nightowl: 3, drain: 3, moonturn: 2, twilight: 3, oborozuki: 3, shingetsu: 3, bleed: 3, gekko: 3, tsukuyomi: 4, mangetsu: 3 } },
   venom: { name: "状態異常", cards: {
@@ -321,6 +322,7 @@ function newPlayer(name, isAI, def, chosen, cos = null) {
            buffs: new Set(), buffRound: null, poison: 0, bleed: 0, counter: false, wrath: false, designated,
            wrathTurns: 0,       // 怒り状態で4枚目を待ったターン数（必殺技のダメージが増える）
            kyoka: false,       // 鏡花水月（相手の攻撃カードを1回だけ1.5倍で跳ね返せる）
+           droughtTurns: 0, droughtDmg: 0, droughtHeal: 0,   // 日照り
            regen: 0, regenTurns: 0,   // 再生（毎ターンHP回復）
            shuraStore: 0,      // 修羅を溜めている間に、HPを払って溜めた分（次の攻撃に乗る）
            shura: false, ritualTurn: 0,   // 修羅を撃った（以降、血の儀式が使える）・AI用：このターンに儀式を使った回数
@@ -745,6 +747,11 @@ class Game {
       const b = p.shield;
       p.shield = Math.min(R.SHIELD_CAP, p.shield + c.power);
       this.log(`血の盾で${p.name}のシールド ${b}→${p.shield}`, "shield", this.idx(p), p.shield - b);
+    } else if (c.type === "drought") {   // 日照り：使ったときと以降3回の自分のターン始めに相手へ直接ダメージ。使ったときと最後にHP回復
+      p.droughtTurns = c.turns; p.droughtDmg = c.power; p.droughtHeal = c.heal;
+      this.log(`${p.name}は日照りを起こした（${c.turns + 1}回、相手のHPに${c.power}。HP+${c.heal}を最初と最後に）`, "buff", this.idx(p));
+      this.heal(p, c.heal, "日照り");
+      this.dotHit(o, c.power, "日照り");
     } else if (c.type === "regen") {
       p.regen = Math.max(p.regen || 0, c.power);
       p.regenTurns = Math.max(p.regenTurns || 0, c.turns);
@@ -1119,6 +1126,12 @@ class Game {
     if (p.berserkTurns) p.berserkTurns--;   // 狂乱も同じ
     this.karmaTick(p);   // このターンの毒まで溜めてから返す
     if (this.over) return;
+    if (p.droughtTurns) {
+      p.droughtTurns--;
+      this.dotHit(this.opp(p), p.droughtDmg, "日照り");
+      if (!p.droughtTurns) this.heal(p, p.droughtHeal, "日照りの終わり");
+      if (this.over) return;
+    }
     if (p.regenTurns) {
       const hb = p.hp;
       this.heal(p, p.regen, "再生");
@@ -1270,6 +1283,7 @@ const AI = {
     if (c.type === "attack" && c.recoil && p.hp <= 15 + c.recoil) return null;
     if (c.hpcost && p.hp <= c.hpcost + 12) return null;   // HPを払うカードは、HPに余裕があるときだけ
     if (c.type === "bloodshield") return p.shield <= 12 ? 3 : null;
+    if (c.type === "drought") return !p.droughtTurns ? 4 : null;
     if (c.type === "regen") return c.overshield ? (!p.regenTurns ? 2.5 : null) : !p.regenTurns && p.hp <= R.MAX_HP - 6 ? 2.5 : null;
     if (["attack", "poison", "summon"].includes(c.type))   // 麻痺：相手が1ターン引けない分を足す（engine.py と同じ）
       return g.preview(p, c) / Math.max(1, c.cost + 0.7 * (c.hpcost || 0)) + (c.paralyze && !o.paralyzeNext ? 2 : 0);
@@ -1657,6 +1671,7 @@ function statusChips(p) {
   if (p.karmaTurns) tag(good, `因果応報 残${p.karmaTurns}`, `溜めた特殊ダメージ${p.karmaStore || 0}→終わるとHP+${Math.floor((p.karmaStore || 0) * R.KARMA_HEAL)}・${Math.floor((p.karmaStore || 0) * R.KARMA_MULT)}を返す`);
   if (p.guard) tag(good, `金剛-${p.guard}`, "次の自分のターンまで受ける攻撃が減る");
   if (p.thornsTurns) tag(good, `棘の鎧 残${p.thornsTurns}`, `攻撃を受けるたび相手に${p.thorns}`);
+  if (p.droughtTurns) tag(good, `日照り 残${p.droughtTurns}`, `ターン開始に相手のHPに${p.droughtDmg}${p.droughtTurns === 1 ? "（このあとHP+" + p.droughtHeal + "）" : ""}`);
   if (p.regenTurns) tag(good, `再生 残${p.regenTurns}`, `ターン開始にHP+${p.regen}`);
   if (p.kyoka) tag(good, "鏡花水月", `攻撃を1回${R.KYOKA_MULT}倍で跳ね返せる`);
   if (p.blessing.includes("day")) tag(good, "天照の加護", "昼カードが常に1.5倍");
@@ -1785,6 +1800,7 @@ function cardMain(p, c) {
   if (c.type === "bleed") return `<big>${c.power}</big>ターン出血。相手はカードを使うたびHP-${R.BLEED_DMG}${c.numbing ? "＋相手の次のターン、使えるカード-1" : ""}`;
   if (c.type === "counter") return `<big>½</big>次に受ける攻撃を半分にし、半分を返す${c.draw ? "。1枚引く" : ""}`;
   if (c.type === "bloodshield") return `<big>+${c.power}</big>HPを${c.hpcost}払ってシールドを増やす`;
+  if (c.type === "drought") return `<big>${c.power}×${c.turns + 1}</big>使うときと以降${c.turns}回のターン始めに相手のHPに${c.power}。最初と最後に自分のHP+${c.heal}`;
   if (c.type === "regen") return `<big>+${c.power}×${c.turns}</big>毎ターン始めにHP回復${c.overshield ? "。あふれた分はシールド" : ""}`;
   if (c.type === "draw") return `<big>${c.power}枚</big>HPを${c.hpcost}払って引く`;
   if (c.type === "sutra") return `<big>仏</big>デッキから仏の怒りを1枚手札へ（残り${p.deck.filter(x => x.id === "buddha").length}枚）`;
@@ -2104,6 +2120,7 @@ function cardBrief(c, id = c.id) {   // カード一覧（CARDS）の中身に�
     case "bleed": return `${c.power}ターン出血（カードを使うたびHP-${R.BLEED_DMG}）${c.numbing ? "・相手の次のターン、使えるカード-1" : ""}`;
     case "counter": return `次に受ける攻撃を半分にし、半分を返す${c.draw ? "。1枚引く" : ""}`;
     case "bloodshield": return `HPを${c.hpcost}払ってシールド+${c.power}`;
+    case "drought": return `使うときと以降${c.turns}回のターン始めに、相手のHPに直接${c.power}ダメージ。最初と最後に自分のHP+${c.heal}`;
     case "regen": return `${c.turns}ターンの間、毎ターンHP+${c.power}${c.overshield ? "（あふれた分はシールドになる）" : ""}`;
     case "summon": return `場にコール：攻撃${c.power}・HP${c.hp}（ターン終了時に攻撃${monExtra(c)}。倒されるとドロップゾーンへ。使う枚数に数えない）`;
     case "buddha": case "ougi": return `溜めている間：${[1, 2, 3].map(k => OUGI[id]?.charge(k)).join(" → ")}。${R.OUGI_AT}枚目で必殺技：${OUGI[id]?.desc || ""}`;
@@ -2133,6 +2150,7 @@ function cardBig(c) {
   switch (c.type) {
     case "attack": return `${c.power}`;
     case "heal": return `+${c.power}`;
+    case "drought": return `${c.power}×${c.turns + 1}`;
     case "regen": return `+${c.power}×${c.turns}`;
     case "summon": return `攻${c.power} HP${c.hp}`;
     case "gassho": case "sunshield": case "nembutsu": case "bloodshield": case "dokumaku": return `+${c.power}`;
