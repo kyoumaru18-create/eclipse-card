@@ -153,7 +153,7 @@ const CARDS = {
   oborozuki:   { name: "朧月",     attr: "night", type: "attack",  power: 5, allday: true, cost: 3, recover: 3 },
   shingetsu:   { name: "亡月",     attr: "night", type: "shieldbreak", power: 7, cost: 2, recover: 3 },
   kamaenaoshi: { name: "構え直し", attr: "day",   type: "counter", draw: 1, cost: 3, recover: 3 },
-  katsu:       { name: "喝",       attr: "night", type: "attack",  power: 5, zeal: true, cost: 3, recover: 3 },
+  katsu:       { name: "喝",       attr: "night", type: "attack",  power: 5, zeal: true, hpref: 10, cost: 3, recover: 3 },
   nembutsu:    { name: "念仏",     attr: "day",   type: "nembutsu", power: 5, cost: 0, recover: 2 },
   rengeki:     { name: "血の連撃", attr: "night", type: "attack",  power: 1, fury: true, hpcost: 2, cost: 0, recover: 3 },
   sunturn:  { name: "陽転",     attr: "day",   type: "convert", to: "day",   free: true, draw: 1, cost: 1, recover: 2 },
@@ -204,9 +204,9 @@ const CARDS = {
   bannin: { name: "番人", attr: "day", type: "summon", power: 2, hp: 10, mthorn: 3, cost: 5, recover: 5 },
   gyakushu: { name: "逆襲", attr: "night", type: "attack", power: 6, revenge: true, cost: 4, recover: 4 },
   yaou: { name: "夜王の裁き", attr: "night", type: "attack", power: 90000, healHp: 50, healSh: 50, joke: true, cost: 0, recover: 0 },   // ネタカード（設定でオンにしたときだけ・賭けなしのAI戦だけ）
-  kongoken: { name: "金剛拳", attr: "day", type: "attack", power: 5, zeal: true, wrathok: true, cost: 2, recover: 3 },
-  myoo: { name: "明王", attr: "night", type: "attack", power: 4, zeal: true, wrathok: true, cost: 1, recover: 2 },
-  rakan: { name: "羅漢", attr: "day", type: "attack", power: 8, zeal: true, cost: 4, recover: 4 },
+  kongoken: { name: "金剛拳", attr: "day", type: "attack", power: 5, zeal: true, shref: 5, wrathok: true, cost: 2, recover: 3 },
+  myoo: { name: "明王", attr: "night", type: "attack", power: 4, zeal: true, hpref: 8, wrathok: true, cost: 1, recover: 2 },
+  rakan: { name: "羅漢", attr: "day", type: "attack", power: 8, zeal: true, shref: 4, cost: 4, recover: 4 },
   bodai: { name: "菩提", attr: "day", type: "heal", power: 6, cure: true, wrathok: true, cost: 0, recover: 2 },
   goma: { name: "護摩", attr: "night", type: "guard", power: 6, wrathok: true, cost: 2, recover: 3 },
   jizo: { name: "地蔵", attr: "day", type: "summon", power: 3, hp: 14, cost: 4, recover: 4 },
@@ -459,6 +459,8 @@ class Game {
     let power = c.power;
     power += polarAtk(p);   // 陽光・零度
     if (c.zeal) power += 2 * charge(p, "buddha");   // 喝：仏の怒りの溜め×2
+    if (c.hpref) power += Math.floor(Math.max(0, p.hp) / c.hpref);   // 仏：いまのHP÷k
+    if (c.shref) power += Math.floor(p.shield / c.shref);   // 仏：いまのシールド÷k
     if (c.paidbonus) power += p.hpPaidTurn || 0;   // 血染めの陽：このターンに払ったHPの分（このカードで払った分も入る）
     if (c.fury) power += 2 * (p.usedTurn || 0) + Math.floor((p.hpPaidTurn || 0) / 3);   // 血の連撃：このターン使ったカード・払ったHP
     if (c.hpcost && !c.rage) power += Math.min(LOSTHP_CAP, Math.floor(Math.max(0, R.MAX_HP - p.hp) / LOSTHP_STEP));   // 減ったHP2ごとに+1
@@ -1757,6 +1759,8 @@ function cardMain(p, c) {
     if (c.allday && m === 1) extra += "昼でも夜でも1.5倍";
     if (c.zeal) extra += "＋仏の怒りの溜め×2";
     if (c.wrathok) extra += "。怒り状態でも使える";
+    if (c.hpref) extra += `＋いまのHP÷${c.hpref}（今+${Math.floor(Math.max(0, p.hp) / c.hpref)}）`;
+    if (c.shref) extra += `＋いまのシールド÷${c.shref}（今+${Math.floor(p.shield / c.shref)}）`;
     if (c.healHp) extra += `使うとHP+${c.healHp}・シールド+${c.healSh || 0}（上限まで）`;
     if (c.takenbonus) extra += `このターンに相手から受けたダメージ（今${p.takenTurn || 0}）の分を足す`;
     if (c.paidbonus) extra += `払ったHP（今${p.hpPaidTurn || 0}＋${c.hpcost}）を足す`;
@@ -2062,7 +2066,7 @@ async function saveDeck(deck) {
 /* デッキ編集画面に出すカードの説明（試合中でなくても出せる固定の文） */
 function cardBrief(c, id = c.id) {   // カード一覧（CARDS）の中身には id が入っていないので、呼ぶ側から渡す
   switch (c.type) {
-    case "attack": return `${c.power}ダメージ${c.drain ? "・与ダメの半分HP回復" : ""}${c.recoil ? `・自分もHP-${c.recoil}` : ""}${c.eclipse ? "・日没と夜明けは2倍" : ""}${c.rage ? `・減ったHP${BLOOD.RAGE_STEP}ごとに+1` : ""}${c.hpcost && !c.rage ? `・減ったHP${LOSTHP_STEP}ごとに+1（最大+${LOSTHP_CAP}）` : ""}${c.hpcost ? `・HPを${c.hpcost}払う` : ""}${c.revenge ? "・前の相手ターンに受けたダメージの半分を上乗せ" : ""}${c.poison ? `・毒${c.poison}` : ""}${c.numbing ? "・相手の次のターン、使えるカード-1" : ""}${c.paralyze ? "・相手の次のターン、ドローできない" : ""}${c.blind ? `・相手を${c.blind}ターン暗闇（引いたカードが裏向き）` : ""}${c.allday ? "・昼でも夜でも1.5倍" : ""}${c.zeal ? "・仏の怒りの溜め×2を足す" : ""}${c.wrathok ? "・怒り状態でも使える" : ""}${c.fury ? "・このターン使ったカード1枚ごとに+2、払ったHP3ごとに+1" : ""}${c.healHp ? `・使うとHP+${c.healHp}・シールド+${c.healSh || 0}` : ""}${c.takenbonus ? "・自分のターンに相手から受けたダメージ（ターン始めの毒など）の分を足す" : ""}${c.paidbonus ? "・このターンに払ったHPの分だけ上乗せ" : ""}${c.attr === "both" ? "・昼でも夜でも1.5倍" : ""}${c.splash ? "・与えた分シールド回復" : ""}${c.frenzy ? "・HPが半分以下なら2倍" : ""}`;
+    case "attack": return `${c.power}ダメージ${c.drain ? "・与ダメの半分HP回復" : ""}${c.recoil ? `・自分もHP-${c.recoil}` : ""}${c.eclipse ? "・日没と夜明けは2倍" : ""}${c.rage ? `・減ったHP${BLOOD.RAGE_STEP}ごとに+1` : ""}${c.hpcost && !c.rage ? `・減ったHP${LOSTHP_STEP}ごとに+1（最大+${LOSTHP_CAP}）` : ""}${c.hpcost ? `・HPを${c.hpcost}払う` : ""}${c.revenge ? "・前の相手ターンに受けたダメージの半分を上乗せ" : ""}${c.poison ? `・毒${c.poison}` : ""}${c.numbing ? "・相手の次のターン、使えるカード-1" : ""}${c.paralyze ? "・相手の次のターン、ドローできない" : ""}${c.blind ? `・相手を${c.blind}ターン暗闇（引いたカードが裏向き）` : ""}${c.allday ? "・昼でも夜でも1.5倍" : ""}${c.zeal ? "・仏の怒りの溜め×2を足す" : ""}${c.hpref ? `・いまのHP÷${c.hpref}を足す` : ""}${c.shref ? `・いまのシールド÷${c.shref}を足す` : ""}${c.wrathok ? "・怒り状態でも使える" : ""}${c.fury ? "・このターン使ったカード1枚ごとに+2、払ったHP3ごとに+1" : ""}${c.healHp ? `・使うとHP+${c.healHp}・シールド+${c.healSh || 0}` : ""}${c.takenbonus ? "・自分のターンに相手から受けたダメージ（ターン始めの毒など）の分を足す" : ""}${c.paidbonus ? "・このターンに払ったHPの分だけ上乗せ" : ""}${c.attr === "both" ? "・昼でも夜でも1.5倍" : ""}${c.splash ? "・与えた分シールド回復" : ""}${c.frenzy ? "・HPが半分以下なら2倍" : ""}`;
     case "draw": return `HPを${c.hpcost}払って${c.power}枚引く`;
     case "sutra": return "デッキから仏の怒りを1枚手札に加える";
     case "gassho": return `シールド+${c.power}。怒り状態でも使える`;
