@@ -36,6 +36,11 @@
     blood:   ["血の盟約パック",   "blood",   ["haisui", "chinoumi"]],
   };
   const PU_PRICE = 150;
+  /* 排出確率の表示（rollCard・rollPU の数字と合わせる） */
+  const ODDS = {
+    card: "1〜4枚目：コモン60%・レア35%・スーパーレア5%／5枚目：レア85%・スーパーレア15%。同じ希少度の中はどれも同じ確率",
+    pu: "1〜4枚目：逆転札12%（2枚で6%ずつ）・そのデッキのカード33%・通常55%（コモン60/レア35/SR5）／5枚目：逆転札45%（22.5%ずつ）・そのデッキのレア以上30%・通常25%（レア85/SR15）。逆転札が1枚以上出る確率は約67%",
+  };
   for (const [k, [name, deck, legends]] of Object.entries(PU))
     PACKS[`pu_${k}`] = [name, PU_PRICE, `${PRESETS[deck].name}のカード5枚（1枚はレア以上）。逆転札「${legends.map(id => CARDS[id].name).join("」「")}」が出やすい`];
 
@@ -237,7 +242,7 @@
     if (shopTab === "pack") {
       body = Object.entries(PACKS).map(([k, [name, price, note]]) => `<div class="shop-item pack-${k.startsWith("pu_") ? "pu pack-" + k : k}">
         <div class="pack-box">${k === "card" ? "CARD" : k === "art" ? "ART" : "PU"}</div>
-        <span class="si-main"><b>${name}</b><small>${note}</small></span>
+        <span class="si-main"><b>${name}</b><small>${note}</small>${ODDS[k.startsWith("pu_") ? "pu" : k] ? `<small class="odds">確率　${ODDS[k.startsWith("pu_") ? "pu" : k]}</small>` : ""}</span>
         ${buyBtn(`pack:${k}`, price, false)}</div>`).join("");
     } else {
       const sec = SHOP[shopTab];
