@@ -116,9 +116,9 @@ function deckType(def) {
 
 /* ===== カードデータ（cards.json と同じ） ===== */
 const CARDS = {
-  strike:   { name: "打撃",       attr: "day",   type: "attack",  power: 5, cost: 3, recover: 3 },
-  bomb:     { name: "爆撃",       attr: "day",   type: "attack",  power: 8, cost: 5, recover: 5 },
-  sunwolf:  { name: "陽の狼",     attr: "day",   type: "summon",  power: 3, hp: 8, cost: 5, recover: 5 },
+  strike:   { name: "打撃",       attr: "day",   type: "attack",  power: 6, cost: 3, recover: 3 },
+  bomb:     { name: "爆撃",       attr: "day",   type: "attack",  power: 9, cost: 5, recover: 5 },
+  sunwolf:  { name: "陽の狼",     attr: "day",   type: "summon",  power: 4, hp: 8, cost: 5, recover: 5 },
   slash:    { name: "斬撃",       attr: "night", type: "attack",  power: 5, cost: 3, recover: 3 },
   ambush:   { name: "闇討ち",     attr: "night", type: "attack",  power: 8, cost: 5, recover: 5 },
   nightowl: { name: "夜の梟",     attr: "night", type: "summon",  power: 2, hp: 8, cost: 5, recover: 5 },
@@ -150,7 +150,7 @@ const CARDS = {
   corrode:  { name: "腐食",     attr: "night", type: "corrode", cost: 2, recover: 3 },
   bloom:    { name: "毒の開花", attr: "day",   type: "bloom",   cost: 3, recover: 3 },
   mushibami:   { name: "蝕み",     attr: "night", type: "linger",  power: 2, turns: 3, cost: 3, recover: 3 },
-  zanshou:     { name: "残照",     attr: "day",   type: "attack",  power: 5, allday: true, cost: 3, recover: 3 },
+  zanshou:     { name: "残照",     attr: "day",   type: "attack",  power: 6, allday: true, cost: 3, recover: 3 },
   nichirin:    { name: "日輪の盾", attr: "day",   type: "sunshield", power: 4, cost: 0, recover: 2 },
   oborozuki:   { name: "朧月",     attr: "night", type: "attack",  power: 5, allday: true, cost: 3, recover: 3 },
   shingetsu:   { name: "亡月",     attr: "night", type: "shieldbreak", power: 7, cost: 2, recover: 3 },
@@ -187,7 +187,7 @@ const CARDS = {
   chimatsuri: { name: "血祭り", attr: "none",  type: "ougi",    cost: 0, recover: 0 },
   hissen:   { name: "緋の一閃", attr: "day",   type: "attack",  power: 2, hpcost: 5, cost: 0, recover: 3 },
   chizome:  { name: "血染めの陽", attr: "day", type: "attack",  power: 1, paidbonus: true, hpcost: 3, cost: 0, recover: 3 },
-  raikou: { name: "雷光", attr: "day", type: "attack", power: 10, cost: 6, recover: 5 },
+  raikou: { name: "雷光", attr: "day", type: "attack", power: 12, cost: 6, recover: 5 },
   youen: { name: "陽炎の盾", attr: "day", type: "sunshield", power: 6, cost: 1, recover: 3 },
   shishi: { name: "陽の獅子", attr: "day", type: "summon", power: 4, hp: 10, cost: 6, recover: 5 },
   hidamari: { name: "陽だまり", attr: "day", type: "regen", power: 2, turns: 6, cost: 1, recover: 3 },
