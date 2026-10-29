@@ -747,6 +747,12 @@ class Game {
       const b = p.shield;
       p.shield = Math.min(R.SHIELD_CAP, p.shield + c.power);
       this.log(`血の盾で${p.name}のシールド ${b}→${p.shield}`, "shield", this.idx(p), p.shield - b);
+    } else if (c.type === "drought" && o.regenOver && o.regenTurns) {   // 夜の現象（月光）と打ち消しあう
+      o.regen = o.regenTurns = 0; o.regenOver = false;
+      this.log(`日照りと${o.name}の月光が打ち消しあった`, "buff", this.idx(p));
+    } else if (c.type === "regen" && c.overshield && o.droughtTurns) {   // 昼の現象（日照り）と打ち消しあう
+      o.droughtTurns = 0;
+      this.log(`月光と${o.name}の日照りが打ち消しあった`, "buff", this.idx(p));
     } else if (c.type === "drought") {   // 日照り：使ったときと以降3回の自分のターン始めに相手へ直接ダメージ。使ったときと最後にHP回復
       p.droughtTurns = c.turns; p.droughtDmg = c.power; p.droughtHeal = c.heal;
       this.log(`${p.name}は日照りを起こした（${c.turns + 1}回、相手のHPに${c.power}。HP+${c.heal}を最初と最後に）`, "buff", this.idx(p));
@@ -1283,8 +1289,8 @@ const AI = {
     if (c.type === "attack" && c.recoil && p.hp <= 15 + c.recoil) return null;
     if (c.hpcost && p.hp <= c.hpcost + 12) return null;   // HPを払うカードは、HPに余裕があるときだけ
     if (c.type === "bloodshield") return p.shield <= 12 ? 3 : null;
-    if (c.type === "drought") return !p.droughtTurns ? 4 : null;
-    if (c.type === "regen") return c.overshield ? (!p.regenTurns ? 2.5 : null) : !p.regenTurns && p.hp <= R.MAX_HP - 6 ? 2.5 : null;
+    if (c.type === "drought") return o.regenOver && o.regenTurns ? 6 : !p.droughtTurns ? 4 : null;
+    if (c.type === "regen") return c.overshield ? (o.droughtTurns ? 6 : !p.regenTurns ? 2.5 : null) : !p.regenTurns && p.hp <= R.MAX_HP - 6 ? 2.5 : null;
     if (["attack", "poison", "summon"].includes(c.type))   // 麻痺：相手が1ターン引けない分を足す（engine.py と同じ）
       return g.preview(p, c) / Math.max(1, c.cost + 0.7 * (c.hpcost || 0)) + (c.paralyze && !o.paralyzeNext ? 2 : 0);
     if (c.type === "bleed") return o.bleed ? null : 4 / c.cost;
@@ -1800,8 +1806,8 @@ function cardMain(p, c) {
   if (c.type === "bleed") return `<big>${c.power}</big>ターン出血。相手はカードを使うたびHP-${R.BLEED_DMG}${c.numbing ? "＋相手の次のターン、使えるカード-1" : ""}`;
   if (c.type === "counter") return `<big>½</big>次に受ける攻撃を半分にし、半分を返す${c.draw ? "。1枚引く" : ""}`;
   if (c.type === "bloodshield") return `<big>+${c.power}</big>HPを${c.hpcost}払ってシールドを増やす`;
-  if (c.type === "drought") return `<big>${c.power}×${c.turns + 1}</big>使うときと以降${c.turns}回のターン始めに相手のHPに${c.power}。最初と最後に自分のHP+${c.heal}`;
-  if (c.type === "regen") return `<big>+${c.power}×${c.turns}</big>毎ターン始めにHP回復${c.overshield ? "。あふれた分はシールド" : ""}`;
+  if (c.type === "drought") return `<big>${c.power}×${c.turns + 1}</big>使うときと以降${c.turns}回のターン始めに相手のHPに${c.power}。最初と最後に自分のHP+${c.heal}。相手の月光と打ち消しあう`;
+  if (c.type === "regen") return `<big>+${c.power}×${c.turns}</big>毎ターン始めにHP回復${c.overshield ? "。あふれた分はシールド。相手の日照りと打ち消しあう" : ""}`;
   if (c.type === "draw") return `<big>${c.power}枚</big>HPを${c.hpcost}払って引く`;
   if (c.type === "sutra") return `<big>仏</big>デッキから仏の怒りを1枚手札へ（残り${p.deck.filter(x => x.id === "buddha").length}枚）`;
   if (c.type === "gassho") return `<big>+${c.power}</big>シールド回復。<b>怒り状態でも使える</b>`;
@@ -2120,8 +2126,8 @@ function cardBrief(c, id = c.id) {   // カード一覧（CARDS）の中身に�
     case "bleed": return `${c.power}ターン出血（カードを使うたびHP-${R.BLEED_DMG}）${c.numbing ? "・相手の次のターン、使えるカード-1" : ""}`;
     case "counter": return `次に受ける攻撃を半分にし、半分を返す${c.draw ? "。1枚引く" : ""}`;
     case "bloodshield": return `HPを${c.hpcost}払ってシールド+${c.power}`;
-    case "drought": return `使うときと以降${c.turns}回のターン始めに、相手のHPに直接${c.power}ダメージ。最初と最後に自分のHP+${c.heal}`;
-    case "regen": return `${c.turns}ターンの間、毎ターンHP+${c.power}${c.overshield ? "（あふれた分はシールドになる）" : ""}`;
+    case "drought": return `使うときと以降${c.turns}回のターン始めに、相手のHPに直接${c.power}ダメージ。最初と最後に自分のHP+${c.heal}。相手の月光と打ち消しあう`;
+    case "regen": return `${c.turns}ターンの間、毎ターンHP+${c.power}${c.overshield ? "（あふれた分はシールドになる。相手の日照りと打ち消しあう）" : ""}`;
     case "summon": return `場にコール：攻撃${c.power}・HP${c.hp}（ターン終了時に攻撃${monExtra(c)}。倒されるとドロップゾーンへ。使う枚数に数えない）`;
     case "buddha": case "ougi": return `溜めている間：${[1, 2, 3].map(k => OUGI[id]?.charge(k)).join(" → ")}。${R.OUGI_AT}枚目で必殺技：${OUGI[id]?.desc || ""}`;
   }
