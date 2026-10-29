@@ -14,7 +14,7 @@
   /* カードの希少度：基本のカードはコモン、デッキの型ごとのカードはレア、奥義はスーパーレア */
   const BASIC = ["strike", "bomb", "slash", "ambush", "jab", "drain", "heal", "firstaid", "counter", "needle", "bleed", "recoil", "sunwolf", "nightowl",
     "mushibami", "zanshou", "nichirin", "oborozuki", "shingetsu", "kamaenaoshi", "katsu", "nembutsu", "rengeki", "zazen", "fudoushin"];   // デッキごとの個性のある基本カードもコモン
-  const rarity = id => isOugi(CARDS[id]) ? "SR" : BASIC.includes(id) ? "C" : "R";
+  const rarity = id => CARDS[id].legend || isOugi(CARDS[id]) ? "SR" : BASIC.includes(id) ? "C" : "R";   // 逆転札（legend）はスーパーレア
   const RARITY_JP = { C: "コモン", R: "レア", SR: "スーパーレア" };
   /* 絵柄違い [名前, 出やすさ] */
   const ARTS = { holo: ["キラ", 50], gold: ["金枠", 35], eclipse: ["日蝕版", 15] };
@@ -26,6 +26,18 @@
     frame: { label: "プロフィール枠", note: "アイコンの枠", items: { plain: ["なし", 0], silver: ["銀", 150], gold: ["金", 400] } },
   };
   const PACKS = { card: ["カードパック", 100, "カード5枚（1枚はレア以上）。デッキに入れられるカードが増える"], art: ["絵柄パック", 150, "絵柄違い3つ（キラ・金枠・日蝕版）。強さは変わらない"] };
+  /* ピックアップパック：デッキの型ごと。その型のカードと「逆転札」が出やすい。5枚目はレア以上 */
+  const PU = {
+    sun:     ["昼の陽光パック",   "sun",     ["yoake", "nichirinren"]],
+    moon:    ["夜の月影パック",   "moon",    ["danzai", "tsukikage"]],
+    venom:   ["毒蛇の巣パック",   "venom",   ["dokubaku", "michizure"]],
+    counter: ["反撃の砦パック",   "counter", ["baigaeshi", "kishikaisei"]],
+    buddha:  ["仏の慈悲パック",   "buddha",  ["sandome", "satori"]],
+    blood:   ["血の盟約パック",   "blood",   ["haisui", "chinoumi"]],
+  };
+  const PU_PRICE = 150;
+  for (const [k, [name, deck, legends]] of Object.entries(PU))
+    PACKS[`pu_${k}`] = [name, PU_PRICE, `${PRESETS[deck].name}のカード5枚（1枚はレア以上）。逆転札「${legends.map(id => CARDS[id].name).join("」「")}」が出やすい`];
 
   let prof = null, key = null, saveTimer = 0, armed = "", shopTab = "pack";
   let user = null;   // Googleでログインしているアカウント { id, name, email }
@@ -223,8 +235,8 @@
     const tabs = [["pack", "パック"], ...Object.entries(SHOP).map(([k, s]) => [k, s.label])];
     let body;
     if (shopTab === "pack") {
-      body = Object.entries(PACKS).map(([k, [name, price, note]]) => `<div class="shop-item pack-${k}">
-        <div class="pack-box">${k === "card" ? "CARD" : "ART"}</div>
+      body = Object.entries(PACKS).map(([k, [name, price, note]]) => `<div class="shop-item pack-${k.startsWith("pu_") ? "pu pack-" + k : k}">
+        <div class="pack-box">${k === "card" ? "CARD" : k === "art" ? "ART" : "PU"}</div>
         <span class="si-main"><b>${name}</b><small>${note}</small></span>
         ${buyBtn(`pack:${k}`, price, false)}</div>`).join("");
     } else {
@@ -266,6 +278,14 @@
     const tier = rareSlot ? (r < 0.15 ? "SR" : "R") : (r < 0.05 ? "SR" : r < 0.40 ? "R" : "C");
     return pick(Object.keys(CARDS).filter(id => !CARDS[id].joke && rarity(id) === tier));
   }
+  /* ピックアップ：逆転札（レア枠で45%・ほかで12%）→ そのデッキのカード → ふつうの確率 */
+  function rollPU(key, rareSlot) {
+    const [, deck, legends] = PU[key];
+    const own = Object.keys(PRESETS[deck].cards).filter(id => !CARDS[id].joke);
+    const r = Math.random();
+    if (rareSlot) return r < 0.45 ? pick(legends) : r < 0.75 ? pick(own.filter(id => rarity(id) !== "C")) : rollCard(true);
+    return r < 0.12 ? pick(legends) : r < 0.45 ? pick(own) : rollCard(false);
+  }
   function rollArt() {
     let r = Math.random() * 100;
     for (const [v, [, w]] of Object.entries(ARTS)) { if ((r -= w) < 0) return v; }
@@ -276,9 +296,9 @@
     if (prof.points < price) return showShop();
     prof.points -= price;
     const got = [];
-    if (kind === "card") {
+    if (kind === "card" || kind.startsWith("pu_")) {
       for (let i = 0; i < 5; i++) {
-        const id = rollCard(i === 4);
+        const id = kind === "card" ? rollCard(i === 4) : rollPU(kind.slice(3), i === 4);
         const full = (prof.owned[id] || 0) >= maxCopies(id);
         if (full) prof.points += DUPE_CARD; else prof.owned[id] = (prof.owned[id] || 0) + 1;
         got.push({ id, isNew: !full && prof.owned[id] === 1, extra: full ? `上限なので+${DUPE_CARD}pt` : `所持${prof.owned[id]}` });

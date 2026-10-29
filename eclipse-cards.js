@@ -138,6 +138,18 @@ const CARDS = {
   bloodblade:  { name: "血刃",   attr: "night", type: "attack",      power: 2, hpcost: 4, cost: 0, recover: 4 },
   bloodlust:   { name: "狂血",   attr: "night", type: "attack",      power: 2, rage: true, hpcost: 3, cost: 2, recover: 4 },
   bloodshield: { name: "血の盾", attr: "day",   type: "bloodshield", power: 8, hpcost: 4, cost: 0, recover: 5 },
+  yoake: { name: "夜明けの剣", attr: "day", type: "attack", power: 4, lowhp: [12, 2.5], legend: true, cost: 3, recover: 3 },
+  nichirinren: { name: "日輪連弾", attr: "day", type: "attack", power: 2, perdrop: 1, legend: true, cost: 4, recover: 4 },
+  danzai: { name: "断罪の月", attr: "night", type: "attack", power: 6, opplow: [15, 2.5], legend: true, cost: 4, recover: 4 },
+  tsukikage: { name: "月影の連撃", attr: "night", type: "attack", power: 3, perdrop: 1, legend: true, cost: 3, recover: 3 },
+  dokubaku: { name: "毒爆", attr: "night", type: "attack", power: 1, poisonscale: 2, legend: true, cost: 4, recover: 4 },
+  michizure: { name: "道連れ", attr: "night", type: "attack", power: 3, debuffbonus: 2, legend: true, cost: 2, recover: 3 },
+  sandome: { name: "仏の顔も三度", attr: "day", type: "attack", power: 3, takenscale: 0.3, legend: true, cost: 3, recover: 3 },
+  satori: { name: "悟り", attr: "day", type: "heal", power: 20, usehp: 10, wrathok: true, legend: true, cost: 2, recover: 3 },
+  haisui: { name: "背水の陣", attr: "night", type: "attack", power: 8, hpcost: 8, lowhp: [20, 2], legend: true, cost: 0, recover: 3 },
+  chinoumi: { name: "血の海", attr: "night", type: "heal", power: 22, usehp: 20, legend: true, cost: 1, recover: 3 },
+  baigaeshi: { name: "倍返し", attr: "day", type: "attack", power: 2, takenscale: 0.4, legend: true, cost: 4, recover: 4 },
+  kishikaisei: { name: "起死回生", attr: "day", type: "heal", power: 24, usehp: 8, legend: true, cost: 1, recover: 3 },
   daichi: { name: "大地の構え", attr: "day", type: "daichi", cost: 3, recover: 3 },
   kyuso: { name: "窮鼠", attr: "none", type: "kyuso", cost: 1, recover: 2 },
   hideri: { name: "日照り", attr: "day", type: "drought", power: 4, turns: 3, heal: 4, cost: 2, recover: 3 },
@@ -251,7 +263,19 @@ const DECK = PRESETS[DEFAULT_PRESET].cards;
 
 /* デッキの枚数・ルール確認 */
 function deckSize(def) { return Object.values(def).reduce((a, b) => a + b, 0); }
-function maxCopies(id) { return isOugi(CARDS[id]) ? R.BUDDHA_MAX : R.MAX_COPIES; }
+function maxCopies(id) { return isOugi(CARDS[id]) ? R.BUDDHA_MAX : CARDS[id].legend ? 2 : R.MAX_COPIES; }   // 逆転札は2枚まで
+/* 逆転札・条件つきカードの説明 */
+function comboText(c, p) {
+  const t = [];
+  if (c.usehp) t.push(`<b>HP${c.usehp}以下のときだけ使える</b>`);
+  if (c.lowhp) t.push(`HP${c.lowhp[0]}以下なら×${c.lowhp[1]}`);
+  if (c.opplow) t.push(`相手のHPが${c.opplow[0]}以下なら×${c.opplow[1]}`);
+  if (c.perdrop) t.push(`ドロップゾーンの攻撃カード1枚ごとに+${c.perdrop}${p ? `（今+${c.perdrop * Math.min(10, p.drop.filter(x => x.type === "attack").length)}）` : ""}`);
+  if (c.poisonscale) t.push(`相手の毒の量×${c.poisonscale}を足す`);
+  if (c.debuffbonus) t.push(`自分のデバフ1つにつき+${c.debuffbonus}`);
+  if (c.takenscale) t.push(`これまでに受けたダメージ${p ? `（今${p.takenTotal || 0}）` : ""}の${c.takenscale}倍を足す`);
+  return t.join("。");
+}
 /* 外から来たデッキ（保存データ・相手のデッキ）を安全な形に直す。おかしければ標準デッキ */
 /* なくなったカード → かわりに入れるカード（保存してあるデッキの枚数が減らないように） */
 const REMOVED_CARDS = { eclipse: ["twilight", "firstaid", "heal", "strike", "slash"] };
@@ -467,6 +491,10 @@ class Game {
     if (c.zeal) power += 2 * charge(p, "buddha");   // 喝：仏の怒りの溜め×2
     if (c.hpref) power += Math.floor(Math.max(0, p.hp) / c.hpref);   // 仏：いまのHP÷k
     if (c.shref) power += Math.floor(p.shield / c.shref);   // 仏：いまのシールド÷k
+    if (c.perdrop) power += c.perdrop * Math.min(10, p.drop.filter(x => x.type === "attack").length);   // 連弾：ドロップゾーンの攻撃カード1枚ごとに+
+    if (c.poisonscale) power += Math.floor(c.poisonscale * this.opp(p).poison);   // 毒爆：相手の毒の量×k
+    if (c.takenscale) power += Math.floor(c.takenscale * (p.takenTotal || 0));   // 仏の顔も三度：これまでに受けたダメージの合計×k
+    if (c.debuffbonus) power += c.debuffbonus * debuffs(p);   // 道連れ：自分のデバフ1つにつき
     if (c.paidbonus) power += p.hpPaidTurn || 0;   // 血染めの陽：このターンに払ったHPの分（このカードで払った分も入る）
     if (c.fury) power += 2 * (p.usedTurn || 0) + Math.floor((p.hpPaidTurn || 0) / 3);   // 血の連撃：このターン使ったカード・払ったHP
     if (c.hpcost && !c.rage) power += Math.min(LOSTHP_CAP, Math.floor(Math.max(0, R.MAX_HP - p.hp) / LOSTHP_STEP));   // 減ったHP2ごとに+1
@@ -476,6 +504,8 @@ class Game {
     if (c.revenge) power += Math.floor((p.revengeBase || 0) * REVENGE_RATE);
     if (c.attr === "day") power += 2 * charge(p, "amaterasu");   // 天照を溜めている間：+2k
     power += p.shuraStore || 0;                                  // 修羅を溜めている間に、HPを払って溜めた分
+    if (c.lowhp && p.hp <= c.lowhp[0]) power = Math.floor(power * c.lowhp[1]);   // 夜明けの剣：HPが少ないほど大逆転
+    if (c.opplow && this.opp(p).hp <= c.opplow[0]) power = Math.floor(power * c.opplow[1]);   // 断罪の月：相手が瀕死ならトドメ
     if (c.frenzy && p.hp <= Math.floor(R.MAX_HP / 2)) power *= 2;  // 鮮血の舞：HPが半分以下なら2倍
     return power;
   }
@@ -665,6 +695,7 @@ class Game {
     if (p.wrath) return mode === "use" && !!c.wrathok;   // 怒り状態では、合掌（を使う）だけ
     if (mode === "use" && c.type === "summon" && p.monsters.length >= R.MAX_MON) return false;
     if (mode === "use" && c.type === "kyuso" && p.hp > KYUSO_HP) return false;
+    if (mode === "use" && c.usehp && p.hp > c.usehp) return false;   // 瀕死のときだけ使える逆転札
     return true;
   }
   /* target：攻撃カードで狙う相手のモンスターの uid（null なら相手プレイヤー） */
@@ -1407,7 +1438,7 @@ const AI = {
       if (c.type === "attack" && g.preview(p, c) >= o.hp + o.shield && p.hp + p.shield > c.cost) return [c.uid, "use"];
     if (p.hp <= R.MAX_HP - 8 || ((p.poison >= 2 || p.bleed) && p.hp <= R.MAX_HP - 4))
       for (const c of hand)
-        if (c.type === "heal" && p.shield >= c.cost && (c.cure || p.hp <= R.MAX_HP - 8)) return [c.uid, "use"];
+        if (c.type === "heal" && g.canPlay(p, c, "use") && p.shield >= c.cost && (c.cure || p.hp <= R.MAX_HP - 8)) return [c.uid, "use"];
     const keep = this.reserved(p);
     let best = null;
     for (const c of hand) {
@@ -1807,6 +1838,7 @@ function cardMain(p, c) {
     if (c.rage) extra += `減ったHP${BLOOD.RAGE_STEP}ごとに+1`;
     if (c.hpcost && !c.rage) extra += `減ったHP${LOSTHP_STEP}ごとに+1（最大+${LOSTHP_CAP}）`;
     if (c.recoil) extra += `自分もHP-${c.recoil}`;
+    if (comboText(c, p)) extra += comboText(c, p);
     if (c.eclipse && m === 1) extra += "日没・夜明けは2倍";
     if (c.revenge) extra += `前の相手ターンに受けたダメージ（${p.revengeBase || 0}）の半分を上乗せ`;
     if (c.poison) extra += `＋毒${c.poison}`;
@@ -1827,7 +1859,7 @@ function cardMain(p, c) {
     if (c.frenzy) extra += p.hp <= R.MAX_HP / 2 ? "（HP半分以下で2倍）" : "HPが半分以下なら2倍";
     return `<big class="${v > c.power ? "boost" : ""}">${v}</big>ダメージ ${extra}`;
   }
-  if (c.type === "heal") return `<big>+${c.power}</big>HPを回復${c.cure ? "・毒と出血も治す" : ""}${c.wrathok ? "。<b>怒り状態でも使える</b>" : ""}`;
+  if (c.type === "heal") return `<big>+${c.power}</big>HPを回復${c.cure ? "・毒と出血も治す" : ""}${c.usehp ? "。" + comboText(c, p) : ""}${c.wrathok ? "。<b>怒り状態でも使える</b>" : ""}`;
   if (c.type === "poison") return `<big>${c.power}</big>毒を与える（毎ターンHPに直接）${c.sleep ? "＋相手の次のターン、引く枚数-1" : ""}`;
   if (c.type === "bleed") return `<big>${c.power}</big>ターン出血。相手はカードを使うたびHP-${R.BLEED_DMG}${c.numbing ? "＋相手の次のターン、使えるカード-1" : ""}`;
   if (c.type === "counter") return `<big>½</big>次に受ける攻撃を半分にし、半分を返す${c.draw ? "。1枚引く" : ""}`;
@@ -2125,7 +2157,7 @@ async function saveDeck(deck) {
 /* デッキ編集画面に出すカードの説明（試合中でなくても出せる固定の文） */
 function cardBrief(c, id = c.id) {   // カード一覧（CARDS）の中身には id が入っていないので、呼ぶ側から渡す
   switch (c.type) {
-    case "attack": return `${c.power}ダメージ${c.drain ? "・与ダメの半分HP回復" : ""}${c.recoil ? `・自分もHP-${c.recoil}` : ""}${c.eclipse ? "・日没と夜明けは2倍" : ""}${c.rage ? `・減ったHP${BLOOD.RAGE_STEP}ごとに+1` : ""}${c.hpcost && !c.rage ? `・減ったHP${LOSTHP_STEP}ごとに+1（最大+${LOSTHP_CAP}）` : ""}${c.hpcost ? `・HPを${c.hpcost}払う` : ""}${c.revenge ? "・前の相手ターンに受けたダメージの半分を上乗せ" : ""}${c.poison ? `・毒${c.poison}` : ""}${c.numbing ? "・相手の次のターン、使えるカード-1" : ""}${c.paralyze ? "・相手の次のターン、ドローできない" : ""}${c.blind ? `・相手を${c.blind}ターン暗闇（引いたカードが裏向き）` : ""}${c.allday ? "・昼でも夜でも1.5倍" : ""}${c.zeal ? "・仏の怒りの溜め×2を足す" : ""}${c.hpref ? `・いまのHP÷${c.hpref}を足す` : ""}${c.shref ? `・いまのシールド÷${c.shref}を足す` : ""}${c.wrathok ? "・怒り状態でも使える" : ""}${c.fury ? "・このターン使ったカード1枚ごとに+2、払ったHP3ごとに+1" : ""}${c.healHp ? `・使うとHP+${c.healHp}・シールド+${c.healSh || 0}` : ""}${c.takenbonus ? "・自分のターンに相手から受けたダメージ（ターン始めの毒など）の分を足す" : ""}${c.paidbonus ? "・このターンに払ったHPの分だけ上乗せ" : ""}${c.attr === "both" ? "・昼でも夜でも1.5倍" : ""}${c.splash ? "・与えた分シールド回復" : ""}${c.frenzy ? "・HPが半分以下なら2倍" : ""}`;
+    case "attack": return `${c.power}ダメージ${c.drain ? "・与ダメの半分HP回復" : ""}${c.recoil ? `・自分もHP-${c.recoil}` : ""}${c.eclipse ? "・日没と夜明けは2倍" : ""}${c.rage ? `・減ったHP${BLOOD.RAGE_STEP}ごとに+1` : ""}${c.hpcost && !c.rage ? `・減ったHP${LOSTHP_STEP}ごとに+1（最大+${LOSTHP_CAP}）` : ""}${c.hpcost ? `・HPを${c.hpcost}払う` : ""}${c.revenge ? "・前の相手ターンに受けたダメージの半分を上乗せ" : ""}${c.poison ? `・毒${c.poison}` : ""}${c.numbing ? "・相手の次のターン、使えるカード-1" : ""}${c.paralyze ? "・相手の次のターン、ドローできない" : ""}${c.blind ? `・相手を${c.blind}ターン暗闇（引いたカードが裏向き）` : ""}${c.allday ? "・昼でも夜でも1.5倍" : ""}${c.zeal ? "・仏の怒りの溜め×2を足す" : ""}${comboText(c) ? "・" + comboText(c) : ""}${c.hpref ? `・いまのHP÷${c.hpref}を足す` : ""}${c.shref ? `・いまのシールド÷${c.shref}を足す` : ""}${c.wrathok ? "・怒り状態でも使える" : ""}${c.fury ? "・このターン使ったカード1枚ごとに+2、払ったHP3ごとに+1" : ""}${c.healHp ? `・使うとHP+${c.healHp}・シールド+${c.healSh || 0}` : ""}${c.takenbonus ? "・自分のターンに相手から受けたダメージ（ターン始めの毒など）の分を足す" : ""}${c.paidbonus ? "・このターンに払ったHPの分だけ上乗せ" : ""}${c.attr === "both" ? "・昼でも夜でも1.5倍" : ""}${c.splash ? "・与えた分シールド回復" : ""}${c.frenzy ? "・HPが半分以下なら2倍" : ""}`;
     case "draw": return `HPを${c.hpcost}払って${c.power}枚引く`;
     case "sutra": return "デッキから仏の怒りを1枚手札に加える";
     case "gassho": return `シールド+${c.power}。怒り状態でも使える`;
@@ -2151,7 +2183,7 @@ function cardBrief(c, id = c.id) {   // カード一覧（CARDS）の中身に�
     case "corrode": return "相手の毒の量だけ相手のシールドを削る";
     case "bloom": return "相手の毒を今すぐ全部HPに入れて、毒を0にする";
     case "convert": return `手札の${c.to === "day" ? "夜" : "昼"}カードを${ATTR_JP[c.to]}属性に変えて1枚引く（1ターンの枚数に数えない）`;
-    case "heal": return `HP+${c.power}${c.cure ? "・毒と出血を治す" : ""}`;
+    case "heal": return `HP+${c.power}${c.cure ? "・毒と出血を治す" : ""}${c.usehp ? "。" + comboText(c) : ""}`;
     case "poison": return `毒${c.power}（毎ターンHPに直接）${c.sleep ? "・相手の次のターン、引く枚数-1" : ""}`;
     case "bleed": return `${c.power}ターン出血（カードを使うたびHP-${R.BLEED_DMG}）${c.numbing ? "・相手の次のターン、使えるカード-1" : ""}`;
     case "counter": return `次に受ける攻撃を半分にし、半分を返す${c.draw ? "。1枚引く" : ""}`;
