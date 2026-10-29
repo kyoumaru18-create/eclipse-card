@@ -18,7 +18,7 @@ const PHASE_ROUNDS = 3;   // 昼・夜それぞれの巡数
 const CYCLE = [...Array(PHASE_ROUNDS).fill("day"), "dusk", ...Array(PHASE_ROUNDS).fill("night"), "dawn"];
 const PHASE_JP = { day: "昼", dusk: "日没", night: "夜", dawn: "夜明け" };
 const ATTR_JP = { day: "昼", night: "夜", none: "無", both: "昼夜" };   // both：昼でも夜でも1.5倍
-const TYPE_JP = { attack: "攻撃", heal: "HP回復", poison: "毒", bleed: "出血", counter: "反撃", summon: "召喚", bloodshield: "血の盾", regen: "再生", drought: "日照り",
+const TYPE_JP = { attack: "攻撃", heal: "HP回復", poison: "毒", bleed: "出血", counter: "反撃", summon: "召喚", bloodshield: "血の盾", regen: "再生", drought: "日照り", daichi: "大地の構え", kyuso: "窮鼠",
   parry: "見切り", karma: "因果応報", thorns: "棘", corrode: "腐食", bloom: "毒の開花", convert: "属性変化",
   draw: "ドロー", sutra: "サーチ", gassho: "シールド", linger: "毒", calm: "守り", dohatsu: "守り", berserk: "強化", poisoncup: "強化", toso: "強化", koromo: "守り", wait: "反撃", dokumaku: "守り", mimic: "守り", sunshield: "シールド", shieldbreak: "シールド破壊", nembutsu: "シールド", guard: "守り", buddha: "奥義", ougi: "奥義" };
 const MONSTER_EXPECT = 3;   // モンスターが倒されるまでに攻撃する回数の目安（AIの見積もり用）
@@ -138,6 +138,8 @@ const CARDS = {
   bloodblade:  { name: "血刃",   attr: "night", type: "attack",      power: 2, hpcost: 4, cost: 0, recover: 4 },
   bloodlust:   { name: "狂血",   attr: "night", type: "attack",      power: 2, rage: true, hpcost: 3, cost: 2, recover: 4 },
   bloodshield: { name: "血の盾", attr: "day",   type: "bloodshield", power: 8, hpcost: 4, cost: 0, recover: 5 },
+  daichi: { name: "大地の構え", attr: "day", type: "daichi", cost: 3, recover: 3 },
+  kyuso: { name: "窮鼠", attr: "none", type: "kyuso", cost: 1, recover: 2 },
   hideri: { name: "日照り", attr: "day", type: "drought", power: 4, turns: 3, heal: 4, cost: 2, recover: 3 },
   gekko: { name: "月光", attr: "night", type: "regen", power: 4, turns: 4, overshield: true, cost: 2, recover: 3 },
   regen:       { name: "再生",   attr: "day",   type: "regen",       power: 3, turns: 4, cost: 2, recover: 4 },
@@ -238,7 +240,7 @@ const PRESETS = {
   venom: { name: "状態異常", cards: {
     needle: 3, bleed: 3, moudoku: 2, mahi: 3, fang: 3, dokuhebi: 2, mushibami: 3, dokugumo: 2, dokumaku: 2, mimic: 2, dokuya: 2, koromo: 2, firstaid: 1, nemurikou: 2, kodoku: 4 } },
   counter: { name: "カウンター", cards: {
-    counter: 3, parry: 3, revenge: 3, thorns: 2, kyoka: 4, karma: 3, strike: 2, slash: 2, monban: 2, kamaenaoshi: 2, machi: 2, drain: 2, heal: 3, firstaid: 3 } },
+    counter: 3, parry: 3, revenge: 3, thorns: 2, kyoka: 4, karma: 3, monban: 2, kamaenaoshi: 2, machi: 2, drain: 2, heal: 2, firstaid: 2, daichi: 3, kyuso: 3 } },
   buddha: { name: "仏の怒り", cards: {
     buddha: 4, sutra: 2, gassho: 2, kongo: 2, zazen: 2, fudoushin: 2, dohatsu: 2, nembutsu: 2, katsu: 2, kongoken: 2, myoo: 2, rakan: 1, niou: 2, counter: 3, heal: 3, firstaid: 3 } },
   blood: { name: "自傷", cards: {
@@ -348,6 +350,7 @@ function stackOf(p, id) { return p.stacks[id] || []; }
 /* 仏の怒りの必殺技の基本ダメージ（怒り状態で待ったターンだけ増える） */
 /* 狂乱：その間は自分のデバフの数だけ攻撃+1（毒・出血はその量だけ）。返されるダメージ（反撃・鏡花水月・水月・棘の鎧）は2倍 */
 const BERSERK_REFLECT = 2, REFLECT_SOURCES = ["反撃", "鏡花水月", "水月", "棘の鎧", "迎え撃ち", "明鏡止水", "門番"];
+const DAICHI_MULT = 2, KYUSO_HP = 10, KYUSO_RATE = 1;   // 大地の構え：受けた分を2倍で返す／窮鼠：HP10以下で、これまでに受けた合計を返す
 const WAIT_MULT = 2.5;   // 待ちの構え：次に受けたダメージをこの倍率で返す
 const DOHATSU_PER = 2;   // 怒髪天：受けたダメージこの量ごとに、必殺技+1・HP+1
 /* 自分についているデバフの数。毒は毒の量、出血は残りターン、ほか（眠り・痺れ・暗闇・蝕み）は1つ1（engine.py の debuffs と同じ） */
@@ -597,6 +600,10 @@ class Game {
   /* 怒髪天の間：受けたダメージ2ごとに、必殺技+1・HP+1 */
   /* 待ちの構え：ダメージを受けたら、その2.5倍を相手に返して待ちが終わる */
   waitHit(p, n) {
+    if (n > 0) {
+      p.takenTotal = (p.takenTotal || 0) + n;
+      if (p.absorb) p.absorbStore = (p.absorbStore || 0) + n;
+    }
     if (!p.waiting || n <= 0 || this.over) return;
     p.waiting = false;
     this.log(`${p.name}の待ちの構え：受けた${n}の${WAIT_MULT}倍を返す`, "counter", this.idx(p));
@@ -657,6 +664,7 @@ class Game {
     if (isOugi(c)) return mode === "use" && !p.stackUsed.includes(c.id) && (!p.wrath || c.id === "buddha");
     if (p.wrath) return mode === "use" && !!c.wrathok;   // 怒り状態では、合掌（を使う）だけ
     if (mode === "use" && c.type === "summon" && p.monsters.length >= R.MAX_MON) return false;
+    if (mode === "use" && c.type === "kyuso" && p.hp > KYUSO_HP) return false;
     return true;
   }
   /* target：攻撃カードで狙う相手のモンスターの uid（null なら相手プレイヤー） */
@@ -784,6 +792,14 @@ class Game {
       this.afflict(p, p, c.power);
       p.koromoTurns = c.turns; p.koromoCut = c.cut;
       this.log(`${p.name}は毒の衣をまとった（${c.turns}ターン、受ける攻撃-${c.cut}）`, "buff", this.idx(p));
+    } else if (c.type === "daichi") {   // 大地の構え：次の自分のターン始めまで、受けたダメージを全部溜める
+      p.absorb = true; p.absorbStore = 0;
+      this.log(`${p.name}は大地の構え（次の自分のターンまでに受けたダメージを溜めて、${DAICHI_MULT}倍で返す）`, "buff", this.idx(p));
+    } else if (c.type === "kyuso") {   // 窮鼠：これまでに受けた合計を相手に返す
+      const n = Math.floor((p.takenTotal || 0) * KYUSO_RATE);
+      p.takenTotal = 0;
+      this.log(`${p.name}の窮鼠！ これまでに受けた分から${n}を返す`, "counter", this.idx(p));
+      this.dealDamage(o, n, "窮鼠");
     } else if (c.type === "wait") {
       p.waiting = true;
       this.log(`${p.name}は待ちの構えに入った（ダメージを受けるまでドローできない。受けたら${WAIT_MULT}倍で返す）`, "buff", this.idx(p));
@@ -1094,6 +1110,13 @@ class Game {
   beginTurn(p) {
     this.log(`第${this.round}巡【${PHASE_JP[this.phase]}】${p.name}のターン`, "turn");
     p.usedTurn = 0; p.hpPaidTurn = 0; p.takenTurn = 0;
+    if (p.absorb) {   // 大地の構え：溜めた分を返す
+      p.absorb = false;
+      const n = Math.floor((p.absorbStore || 0) * DAICHI_MULT); p.absorbStore = 0;
+      this.log(`${p.name}の大地の構え！ 溜めたダメージを${n}にして返す`, "counter", this.idx(p));
+      if (n > 0) this.dealDamage(this.opp(p), n, "大地の反撃");
+      if (this.over) return;
+    }
     p.kageuchi = false; p.meikyo = false; p.ritualTurn = 0;
     p.dokumaku = 0; p.mimic = 0;   // 毒の膜・擬態は次の自分のターンまで
     for (const m of p.monsters) m.acted = false;   // モンスターは自分のターンごとに1回攻撃できる
@@ -1304,6 +1327,8 @@ const AI = {
     if (c.type === "dokumaku") return p.dokumaku ? null : (p.shield <= 20 || o.monsters.length ? 4 : 2.5) / Math.max(1, c.cost);   // engine.py と同じ
     if (c.type === "mimic") return p.mimic || p.parry ? null : 5 / Math.max(1, c.cost);
     if (c.type === "koromo") return p.koromoTurns || p.hp <= 15 ? null : 4 / Math.max(1, c.cost);   // HPに余裕があって、まだまとっていないとき
+    if (c.type === "daichi") return p.absorb ? null : 4 / Math.max(1, c.cost);
+    if (c.type === "kyuso") { const n = (p.takenTotal || 0) * KYUSO_RATE; return n >= 12 && (n >= o.hp + o.shield || p.hp <= 6) ? 12 : null; }
     if (c.type === "wait") return p.waiting || p.hand.length < 4 ? null : 4 / Math.max(1, c.cost);   // 手札が多くて、まだ待っていないとき
     if (c.type === "toso") {   // まだ闘争していなくて、攻撃カードが手札に2枚以上あるとき（engine.py と同じ）
       const atk = p.hand.filter(x => x.type === "attack" && x !== c).length;
@@ -1663,6 +1688,7 @@ function statusChips(p) {
   if (p.dokumaku) tag(good, "毒の膜", `攻撃してきた相手に毒${p.dokumaku}`);
   if (p.mimic) tag(good, "擬態", `次に受ける攻撃を0にして、相手に毒${p.mimic}`);
   if (p.koromoTurns) tag(good, `毒の衣 残${p.koromoTurns}`, `受ける攻撃-${p.koromoCut}`);
+  if (p.absorb) tag(good, "大地の構え", `次の自分のターンに、溜めた${p.absorbStore || 0}の${DAICHI_MULT}倍（${Math.floor((p.absorbStore || 0) * DAICHI_MULT)}）を返す`);
   if (p.waiting) tag(good, "待ちの構え", `ドローできない・次に受けたダメージを${WAIT_MULT}倍で返す`);
   if (p.tosoTurns) tag(good, `闘争 残${p.tosoTurns}`, tosoMult(p) > 1 ? `HP${p.hp}：与えるダメージ×${tosoMult(p)}（いま発動中）` : `HP${TOSO_HP}以下で×${TOSO_MULT}、${TOSO_HP2}以下で×${TOSO_MULT2}`);
   if (p.berserkTurns) tag(good, `狂乱 残${p.berserkTurns}`, `攻撃+${debuffs(p)}（デバフの数）・返されるダメージ2倍`);
@@ -1815,6 +1841,8 @@ function cardMain(p, c) {
   if (c.type === "dokumaku") return `<big>+${c.power}</big>シールド回復。次の自分のターンまで、攻撃してきた相手に毒${c.poison}（モンスターの攻撃でも）`;
   if (c.type === "mimic") return `<big>0</big>次に受ける攻撃を0にして、攻撃してきた相手に毒${c.poison}`;
   if (c.type === "koromo") return `<big>-${c.cut}</big>自分に毒${c.power}。${c.turns}ターン、受ける攻撃-${c.cut}`;
+  if (c.type === "daichi") return `<big>×${DAICHI_MULT}</big>次の自分のターンまでに受けたダメージを全部溜めて、始めに${DAICHI_MULT}倍で返す`;
+  if (c.type === "kyuso") return `<big>${Math.floor((p.takenTotal || 0) * KYUSO_RATE)}</big>HP${KYUSO_HP}以下だけ。これまでに受けたダメージの合計を相手に返す（使うとリセット）`;
   if (c.type === "wait") return `<big>×${WAIT_MULT}</big>ダメージを受けるまでドローできない。次に受けたダメージを${WAIT_MULT}倍で返す`;
   if (c.type === "toso") return `<big>×${TOSO_MULT2}</big>${c.turns}ターン、HP16以下だと与えるダメージ×${TOSO_MULT}、HP${TOSO_HP2}以下だと×${TOSO_MULT2}`;
   if (c.type === "poisoncup") return `<big>毒${c.power}</big>自分に毒${c.power}を付ける。そのかわり${c.turns}ターン、自分のデバフの数だけ攻撃+1`;
@@ -2105,6 +2133,8 @@ function cardBrief(c, id = c.id) {   // カード一覧（CARDS）の中身に�
     case "dokumaku": return `シールド+${c.power}。次の自分のターンまで、攻撃してきた相手に毒${c.poison}`;
     case "mimic": return `次に受ける攻撃を0にして、攻撃してきた相手に毒${c.poison}`;
     case "koromo": return `自分に毒${c.power}。${c.turns}ターン、受ける攻撃-${c.cut}`;
+    case "daichi": return `次の自分のターンまでに受けたダメージを全部溜めて、ターンの始めに${DAICHI_MULT}倍で相手に返す`;
+    case "kyuso": return `HP${KYUSO_HP}以下だけ使える。これまでに受けたダメージの合計を相手に返す（使うとリセット）`;
     case "wait": return `ダメージを受けるまでドローできない。次に受けたダメージを${WAIT_MULT}倍で返す`;
     case "toso": return `${c.turns}ターン、HP16以下だと与えるダメージ×${TOSO_MULT}、HP${TOSO_HP2}以下だと×${TOSO_MULT2}`;
     case "poisoncup": return `自分に毒${c.power}を付ける。そのかわり${c.turns}ターン、自分のデバフの数だけ攻撃+1（狂乱の状態）`;
@@ -2167,6 +2197,8 @@ function cardBig(c) {
     case "koromo": case "dohatsu": return `-${c.cut || c.power}`;
     case "draw": return `${c.power}枚`;
     case "karma": case "berserk": return `${c.turns}T`;
+    case "daichi": return `×${DAICHI_MULT}`;
+    case "kyuso": return "窮鼠";
     case "wait": return `×${WAIT_MULT}`;
     case "parry": case "mimic": return "0";
     case "buddha": case "ougi": return "奥義";
