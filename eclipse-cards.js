@@ -138,8 +138,8 @@ const CARDS = {
   bloodblade:  { name: "血刃",   attr: "night", type: "attack",      power: 2, hpcost: 4, cost: 0, recover: 4 },
   bloodlust:   { name: "狂血",   attr: "night", type: "attack",      power: 2, rage: true, hpcost: 3, cost: 2, recover: 4 },
   bloodshield: { name: "血の盾", attr: "day",   type: "bloodshield", power: 8, hpcost: 4, cost: 0, recover: 5 },
-  yoake: { name: "夜明けの剣", attr: "day", type: "attack", power: 4, lowhp: [12, 2.5], legend: true, cost: 3, recover: 3 },
-  nichirinren: { name: "日輪連弾", attr: "day", type: "attack", power: 2, perdrop: 1, legend: true, cost: 4, recover: 4 },
+  yoake: { name: "夜明けの剣", attr: "day", type: "attack", power: 4, lowhp: [12, 2], legend: true, cost: 3, recover: 3 },
+  nichirinren: { name: "日輪連弾", attr: "day", type: "attack", power: 0, perdrop: 1, legend: true, cost: 4, recover: 4 },
   danzai: { name: "断罪の月", attr: "night", type: "attack", power: 6, opplow: [15, 2.5], legend: true, cost: 4, recover: 4 },
   tsukikage: { name: "月影の連撃", attr: "night", type: "attack", power: 3, perdrop: 1, legend: true, cost: 3, recover: 3 },
   dokubaku: { name: "毒爆", attr: "night", type: "attack", power: 1, poisonscale: 2, legend: true, cost: 4, recover: 4 },
@@ -148,8 +148,8 @@ const CARDS = {
   satori: { name: "悟り", attr: "day", type: "heal", power: 20, usehp: 10, wrathok: true, legend: true, cost: 2, recover: 3 },
   haisui: { name: "背水の陣", attr: "night", type: "attack", power: 8, hpcost: 8, lowhp: [20, 2], legend: true, cost: 0, recover: 3 },
   chinoumi: { name: "血の海", attr: "night", type: "heal", power: 22, usehp: 20, legend: true, cost: 1, recover: 3 },
-  baigaeshi: { name: "倍返し", attr: "day", type: "attack", power: 2, takenscale: 0.4, legend: true, cost: 4, recover: 4 },
-  kishikaisei: { name: "起死回生", attr: "day", type: "heal", power: 24, usehp: 8, legend: true, cost: 1, recover: 3 },
+  baigaeshi: { name: "倍返し", attr: "day", type: "attack", power: 2, takenscale: 0.5, legend: true, cost: 3, recover: 3 },
+  kishikaisei: { name: "起死回生", attr: "day", type: "heal", power: 24, usehp: 8, daichi: true, legend: true, cost: 1, recover: 3 },
   daichi: { name: "大地の構え", attr: "day", type: "daichi", cost: 3, recover: 3 },
   kyuso: { name: "窮鼠", attr: "none", type: "kyuso", cost: 1, recover: 2 },
   hideri: { name: "日照り", attr: "day", type: "drought", power: 4, turns: 3, heal: 4, cost: 2, recover: 3 },
@@ -268,9 +268,10 @@ function maxCopies(id) { return isOugi(CARDS[id]) ? R.BUDDHA_MAX : CARDS[id].leg
 function comboText(c, p) {
   const t = [];
   if (c.usehp) t.push(`<b>HP${c.usehp}以下のときだけ使える</b>`);
+  if (c.daichi) t.push("使うと同時に大地の構えに入る");
   if (c.lowhp) t.push(`HP${c.lowhp[0]}以下なら×${c.lowhp[1]}`);
   if (c.opplow) t.push(`相手のHPが${c.opplow[0]}以下なら×${c.opplow[1]}`);
-  if (c.perdrop) t.push(`ドロップゾーンの攻撃カード1枚ごとに+${c.perdrop}${p ? `（今+${c.perdrop * Math.min(10, p.drop.filter(x => x.type === "attack").length)}）` : ""}`);
+  if (c.perdrop) t.push(`ドロップゾーンの攻撃カード1枚ごとに+${c.perdrop}（最大8枚）${p ? `（今+${c.perdrop * Math.min(8, p.drop.filter(x => x.type === "attack").length)}）` : ""}`);
   if (c.poisonscale) t.push(`相手の毒の量×${c.poisonscale}を足す`);
   if (c.debuffbonus) t.push(`自分のデバフ1つにつき+${c.debuffbonus}`);
   if (c.takenscale) t.push(`これまでに受けたダメージ${p ? `（今${p.takenTotal || 0}）` : ""}の${c.takenscale}倍を足す`);
@@ -491,7 +492,7 @@ class Game {
     if (c.zeal) power += 2 * charge(p, "buddha");   // 喝：仏の怒りの溜め×2
     if (c.hpref) power += Math.floor(Math.max(0, p.hp) / c.hpref);   // 仏：いまのHP÷k
     if (c.shref) power += Math.floor(p.shield / c.shref);   // 仏：いまのシールド÷k
-    if (c.perdrop) power += c.perdrop * Math.min(10, p.drop.filter(x => x.type === "attack").length);   // 連弾：ドロップゾーンの攻撃カード1枚ごとに+
+    if (c.perdrop) power += c.perdrop * Math.min(8, p.drop.filter(x => x.type === "attack").length);   // 連弾：ドロップゾーンの攻撃カード1枚ごとに+
     if (c.poisonscale) power += Math.floor(c.poisonscale * this.opp(p).poison);   // 毒爆：相手の毒の量×k
     if (c.takenscale) power += Math.floor(c.takenscale * (p.takenTotal || 0));   // 仏の顔も三度：これまでに受けたダメージの合計×k
     if (c.debuffbonus) power += c.debuffbonus * debuffs(p);   // 道連れ：自分のデバフ1つにつき
@@ -774,6 +775,7 @@ class Game {
     } else if (c.type === "heal") {
       this.heal(p, c.power, c.name);
       if (c.cure && (p.poison || p.bleed)) { p.poison = 0; p.bleed = 0; this.log("毒と出血が治った"); }
+      if (c.daichi) { p.absorb = true; p.absorbStore = 0; this.log(`${p.name}は大地の構えに入った（次の自分のターンまでに受けたダメージを${DAICHI_MULT}倍で返す）`, "buff", this.idx(p)); }   // 起死回生
     } else if (c.type === "poison") {
       this.afflict(p, o, c.power + (p.buffs.has("virulent") ? 2 : 0));   // 秘奥・猛毒で+2
     } else if (c.type === "bleed") {
