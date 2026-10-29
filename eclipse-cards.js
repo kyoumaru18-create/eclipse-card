@@ -751,7 +751,7 @@ class Game {
       p.droughtTurns = c.turns; p.droughtDmg = c.power; p.droughtHeal = c.heal;
       this.log(`${p.name}は日照りを起こした（${c.turns + 1}回、相手のHPに${c.power}。HP+${c.heal}を最初と最後に）`, "buff", this.idx(p));
       this.heal(p, c.heal, "日照り");
-      this.dotHit(o, c.power, "日照り");
+      this.directHp(o, c.power, "日照り");
     } else if (c.type === "regen") {
       p.regen = Math.max(p.regen || 0, c.power);
       p.regenTurns = Math.max(p.regenTurns || 0, c.turns);
@@ -1128,7 +1128,7 @@ class Game {
     if (this.over) return;
     if (p.droughtTurns) {
       p.droughtTurns--;
-      this.dotHit(this.opp(p), p.droughtDmg, "日照り");
+      this.directHp(this.opp(p), p.droughtDmg, "日照り");
       if (!p.droughtTurns) this.heal(p, p.droughtHeal, "日照りの終わり");
       if (this.over) return;
     }
